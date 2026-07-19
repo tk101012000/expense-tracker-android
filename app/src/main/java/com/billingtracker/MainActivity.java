@@ -63,7 +63,9 @@ public class MainActivity extends Activity {
             }
         });
 
-        webView.loadUrl(APP_URL);
+        // 每次啟動都在網址後加 cache-buster，強迫 WebView 抓取最新網頁，
+        // 避免「要手動清快取才能更新」的問題。不影響 localStorage 資料。
+        webView.loadUrl(APP_URL + "?nocache=" + System.currentTimeMillis());
     }
 
     // 處理檔案選擇器的回傳結果
