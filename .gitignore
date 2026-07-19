@@ -1,0 +1,17 @@
+# 編譯產物
+build/
+.gradle/
+local.properties
+
+# IDE
+*.iml
+.idea/
+*.xcworkspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 簽章金鑰（勿上傳私人金鑰）
+*.jks
+*.keystore

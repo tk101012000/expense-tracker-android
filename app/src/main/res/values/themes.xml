@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.BillingTracker" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#2563eb</item>
+        <item name="android:navigationBarColor">#f3f4f6</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+</resources>

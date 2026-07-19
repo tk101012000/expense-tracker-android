@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 背景：品牌藍 -->
+    <path
+        android:fillColor="#2563eb"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- ¥ 符號（粗白線） -->
+    <path
+        android:strokeColor="#ffffff"
+        android:strokeWidth="9"
+        android:strokeLineCap="round"
+        android:pathData="M54,28 L54,80 M38,52 L70,52 M44,40 L64,40" />
+</vector>
