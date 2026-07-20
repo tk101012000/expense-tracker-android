@@ -25,7 +25,23 @@
         var isAndroid = /Android/i.test(navigator.userAgent);
         var u = new URL(location.href);
         if (!isNative && isAndroid && u.searchParams.get('code')) {
-          location.replace('billingtracker://oauth/callback' + location.search);
+          var cb = 'billingtracker://oauth/callback' + location.search;
+          // v3.29：先嘗試自動跳回 App（多數 Chrome 允許）；若被部分 ROM/Chrome 擋下，
+          // 顯示「返回 App」按鈕，由使用者手勢觸發 — 自訂 scheme 的使用者手勢導覽一定被允許，
+          // 避免「授權頁按完卻卡死、code 回不到 App」的靜默失敗。
+          var go = function () { location.href = cb; };
+          setTimeout(go, 300);
+          document.addEventListener('DOMContentLoaded', function () {
+            var box = document.createElement('div');
+            box.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;'
+              + 'align-items:center;justify-content:center;background:#fff;color:#222;'
+              + 'font-family:sans-serif;padding:24px;text-align:center;z-index:9999';
+            box.innerHTML = '<div style="font-size:18px;margin-bottom:16px">授權完成，正在返回 App…</div>'
+              + '<button id="bkBackBtn" style="font-size:16px;padding:12px 24px;border:0;'
+              + 'border-radius:10px;background:#2563eb;color:#fff">↩ 點此返回 App 完成登入</button>';
+            document.body.appendChild(box);
+            document.getElementById('bkBackBtn').addEventListener('click', go);
+          });
         }
       } catch (e) {}
     })();
@@ -319,7 +335,7 @@
             <button class="ghost-btn" id="cloudDownloadBtn" disabled>下載還原</button>
             <button class="danger-btn" id="cloudDisconnectBtn" disabled>斷線</button>
           </div>
-          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.28]</small></p>
+          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.29]</small></p>
           <p class="hint-text">備份內容為完整資料（帳戶／交易／繳費）的 JSON，儲存於你的雲端硬碟私人空間；採用客戶端 OAuth（PKCE），不經過任何第三方伺服器。</p>
         </div>
       </section>
@@ -569,7 +585,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/cloud.js?v=yu-v3.28"></script>
-  <script src="js/app.js?v=yu-v3.28"></script>
+  <script src="js/cloud.js?v=yu-v3.29"></script>
+  <script src="js/app.js?v=yu-v3.29"></script>
 </body>
 </html>

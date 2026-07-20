@@ -337,6 +337,7 @@
      MainActivity.onNewIntent 收到後呼叫此函式完成 token 交換。 */
   window.BKOAuthBridge = async function (code, stateKey, err, verifier, provider) {
     nativeLog('BKOAuthBridge called code=' + (code ? code.slice(0,6) + '…' : 'null') + ' provider=' + provider);
+    setStatus('授權處理中…請稍候');   // v3.29：一進入立刻顯示進度，確保使用者看得到（非靜默）
     if (!code) {
       const m = err ? ('授權失敗：' + err) : '授權已取消';
       setStatus(m); toast(m); cleanup(); return;

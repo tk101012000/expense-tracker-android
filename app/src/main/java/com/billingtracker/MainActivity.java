@@ -53,6 +53,9 @@ public class MainActivity extends Activity {
     // 若 OAuth 回傳來得比頁面載入更早，先暫存 pending，待 onPageFinished 再執行。
     private boolean pageReady = false;
     private String pendingOAuth = null;
+    // v3.29：遷移階段若觸發 location.reload()，原本暫存的 pendingOAuth 會隨舊頁面遺失；
+    // 改存此欄位，待 reload 完成後的 onPageFinished 再注入 BKOAuthBridge。
+    private String deferredOAuth = null;
 
     // OAuth PKCE 狀態：連接時由網頁傳來，回傳時要能找回 verifier 完成 token 交換。
     // 存入 SharedPreferences 以在 App 被系統回收（WebView 重建）後仍可取回，
@@ -161,6 +164,9 @@ public class MainActivity extends Activity {
                     appPrefs.edit().putBoolean("https_migrated", true).apply();
                     // "{}" 為 4 字元，代表舊端無資料；有資料才注入並重載讓 app.js 重讀 DB。
                     if (migrationData != null && migrationData.length() > 4 && !"null".equals(migrationData)) {
+                        // v3.29：若此刻有待處理的 OAuth 回傳，先移到 deferredOAuth，
+                        // 否則隨即將發生的 location.reload() 會把 BKOAuthBridge 執行吃掉。
+                        if (pendingOAuth != null) { deferredOAuth = pendingOAuth; pendingOAuth = null; }
                         String js = "(function(){try{var o=JSON.parse(" + migrationData + ");var n=0;"
                                   + "for(var k in o){if(localStorage.getItem(k)===null){localStorage.setItem(k,o[k]);n++;}}"
                                   + "if(n>0)location.reload();}catch(e){}})();";
@@ -169,7 +175,12 @@ public class MainActivity extends Activity {
                     migrationData = null;
                 }
 
-                // 若 OAuth 回傳在頁面載入前就到了，此時補執行
+                // 頁面就緒：先處理「遷移 reload 後」的 deferred OAuth（確保在已遷移的頁面執行），
+                // 再處理一般 pendingOAuth（OAuth 回傳早於頁面載入時暫存者）。
+                if (deferredOAuth != null) {
+                    String js = deferredOAuth; deferredOAuth = null;
+                    view.evaluateJavascript(js, null);
+                }
                 if (pendingOAuth != null) {
                     String js = pendingOAuth;
                     pendingOAuth = null;
