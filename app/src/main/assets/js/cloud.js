@@ -183,6 +183,8 @@
     // #3 修復：saveState 不再包含 clientSecret（因為根本沒存進去）
     saveState();
     refreshUI();
+    // 連線成功後通知上層（App 可立即檢查是否該自動備份）
+    try { if (window.BK && typeof window.BK.onCloudConnected === 'function') window.BK.onCloudConnected(); } catch (e) {}
   }
 
   /* #12 修復：ensureToken 加入 in-flight 鎖，防止並發 refresh 導致 refresh token 失效
@@ -230,16 +232,37 @@
   }
 
   /* ---------- 上傳 / 下載 ---------- */
+  let autoBacking = false;
+  async function doUpload() {
+    const tok = await ensureToken();
+    const data = window.BK.exportData();
+    if (state.provider === 'drive') await uploadDrive(tok, data);
+    else await uploadDropbox(tok, data);
+  }
   async function upload() {
-    let stage = '取得憑證';
     try {
-      const tok = await ensureToken();
-      stage = '上傳雲端';
-      const data = window.BK.exportData();
-      if (state.provider === 'drive') await uploadDrive(tok, data);
-      else await uploadDropbox(tok, data);
+      await doUpload();
       toast('備份已上傳至 ' + PROVIDERS[state.provider].name);
-    } catch (e) { toast('上傳失敗（' + stage + '）：' + (e.message || e)); }
+    } catch (e) { toast('上傳失敗：' + (e.message || e)); }
+  }
+  /** 自動備份：安靜執行，不彈成功 toast；失敗僅 logcat，避免干擾使用者。
+   *  成功後經 window.BK.markCloudBackup() 記錄最後備份時間，供 UI 顯示「上次備份」。 */
+  async function autoBackup() {
+    if (autoBacking) return;
+    autoBacking = true;
+    try {
+      await doUpload();
+      try { if (window.BK && typeof window.BK.markCloudBackup === 'function') window.BK.markCloudBackup(); } catch (e) {}
+      setStatus('已自動備份至 ' + PROVIDERS[state.provider].name + '（' + timeStr(new Date()) + '）');
+      nativeLog('autoBackup ok');
+    } catch (e) {
+      nativeLog('autoBackup failed: ' + (e && (e.message || e.toString()) || 'unknown'));
+    } finally { autoBacking = false; }
+  }
+  function isConnected() { return !!state.accessToken && !!state.provider; }
+  function timeStr(d) {
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes());
   }
   async function download() {
     let stage = '取得憑證';
@@ -376,5 +399,7 @@
       bindUI();
     },
     refreshUI,
+    isConnected,
+    autoBackup,
   };
 })();

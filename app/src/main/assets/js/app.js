@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.33';
+const APP_VERSION = 'yu-v3.34';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -2033,6 +2033,52 @@ function shiftMonth(mk, n) {
 /* =========================================================
    初始化
    ========================================================= */
+/* ============ 每日自動雲端備份（v3.34） ============
+   說明：Web/PWA + Android WebView 無法在 App 關閉時做 OS 級排程，
+   故採「開啟/前景時自動備份」策略：距上次備份超過 24 小時且已連線，
+   就在 App 啟動時（與每 5 分鐘的定期檢查）自動上傳一次。 */
+const AUTO_BACKUP_INTERVAL = 24 * 3600 * 1000;   // 24 小時
+let autoBackupTimer = null;
+
+function fmtDateTime(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function refreshAutoBackupInfo() {
+  const el = $('#autoBackupInfo'); if (!el) return;
+  const s = DB.settings || {};
+  const tog = $('#autoBackupToggle');
+  if (tog) tog.checked = !!s.autoBackup;
+  const last = s.lastCloudBackup;
+  if (s.autoBackup) {
+    el.textContent = last ? ('已開啟 · 上次備份：' + fmtDateTime(new Date(last)))
+                          : '已開啟 · 尚未自動備份';
+  } else {
+    el.textContent = '關閉（開啟後將每天自動備份）';
+  }
+}
+
+async function checkAutoBackup() {
+  const s = DB.settings || {};
+  if (!s.autoBackup) return;
+  if (!window.Cloud || !window.Cloud.isConnected()) return;
+  const last = s.lastCloudBackup || 0;
+  if (Date.now() - last < AUTO_BACKUP_INTERVAL) return;   // 未滿 24h，跳過
+  try { await window.Cloud.autoBackup(); } catch (e) {}
+  refreshAutoBackupInfo();
+}
+
+function scheduleAutoBackup() {
+  refreshAutoBackupInfo();
+  if (autoBackupTimer) clearInterval(autoBackupTimer);
+  autoBackupTimer = setInterval(checkAutoBackup, 5 * 60 * 1000);   // 每 5 分鐘檢查
+  setTimeout(checkAutoBackup, 4000);   // 啟動後延遲 4 秒，等雲端 init 完成
+  // App 切回前景（手機回來 / 分頁可視）時也檢查一次
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkAutoBackup(); });
+  window.addEventListener('focus', checkAutoBackup);
+}
+
 function init() {
   load();
   fillFilterCategory();
@@ -2044,6 +2090,16 @@ function init() {
   switchView('dashboard');
   // 雲端模組（處理 OAuth 回跳、綁定 UI）
   if (window.Cloud) Cloud.init();
+  // 每日自動雲端備份排程 + 開關綁定（v3.34）
+  scheduleAutoBackup();
+  const abt = $('#autoBackupToggle');
+  if (abt) abt.addEventListener('change', () => {
+    DB.settings ||= {};
+    DB.settings.autoBackup = abt.checked;
+    save();
+    refreshAutoBackupInfo();
+    if (abt.checked) checkAutoBackup();   // 開啟即檢查一次（若已連線且逾 24h 會立即備份）
+  });
   // 註冊 service worker。
   // App 內（window.BKNATIVE 存在）改由原生 shouldInterceptRequest 提供本地 assets 離線，
   // 不需 SW；且 SW 快取會攔截 https://tk101012000.github.io 的請求，可能干擾原生攔截與
@@ -2076,4 +2132,13 @@ window.BK = {
     if (!save()) return;  // #8 修復
     render();
   },
+  // v3.34：自動備份成功後記錄最後備份時間並刷新 UI
+  markCloudBackup: () => {
+    DB.settings ||= {};
+    DB.settings.lastCloudBackup = Date.now();
+    save();
+    refreshAutoBackupInfo();
+  },
+  // v3.34：雲端連線成功後，App 立即檢查是否該自動備份
+  onCloudConnected: () => { checkAutoBackup(); },
 };
