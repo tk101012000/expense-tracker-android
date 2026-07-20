@@ -10,8 +10,8 @@ android {
         applicationId 'com.billingtracker'
         minSdk 24
         targetSdk 34
-        versionCode 25
-        versionName '3.30'
+        versionCode 26
+        versionName '3.31'
     }
 
     buildTypes {

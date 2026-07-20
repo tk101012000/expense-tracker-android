@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.30';
+const APP_VERSION = 'yu-v3.31';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -1814,6 +1814,8 @@ function doImport(parsed) {
   const sanitized = validateAndSanitize(parsed);
   if (!confirm('匯入將覆蓋目前所有資料，確定繼續？')) return false;
   DB = sanitized;
+  DB.settings ||= {};
+  DB.accounts ||= []; DB.txns ||= []; DB.bills ||= []; DB.members ||= [];
   if (!save()) return false;  // #8 修復
   render(); toast('匯入成功');
   return true;
@@ -2053,6 +2055,9 @@ window.BK = {
     const d = JSON.parse(str);
     const sanitized = validateAndSanitize(d);  // #9 修復：雲端還原也走 schema 校驗
     DB = sanitized;
+    // 與 load() 同級防護：確保 settings 與陣列欄位存在（舊版備份可能缺少）
+    DB.settings ||= {};
+    DB.accounts ||= []; DB.txns ||= []; DB.bills ||= []; DB.members ||= [];
     if (!save()) return;  // #8 修復
     render();
   },
