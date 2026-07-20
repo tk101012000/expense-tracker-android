@@ -335,7 +335,7 @@
             <button class="ghost-btn" id="cloudDownloadBtn" disabled>下載還原</button>
             <button class="danger-btn" id="cloudDisconnectBtn" disabled>斷線</button>
           </div>
-          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.35]</small></p>
+          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.36]</small></p>
           <label class="field-toggle" style="margin-top:12px">
             <span>每日自動雲端備份</span>
             <input type="checkbox" id="autoBackupToggle">
@@ -577,6 +577,14 @@
           <div id="splitResults" class="split-result-list"></div>
           <div class="split-total" id="splitResultTotal"></div>
           <div class="split-record-row">
+            <label class="inline-field">扣款帳戶
+              <select id="splitAccount" class="mini-select"></select>
+            </label>
+            <label class="inline-field">類別
+              <select id="splitCategory" class="mini-select"></select>
+            </label>
+          </div>
+          <div class="split-record-row">
             <label class="inline-field">付款人
               <select id="splitPayer" class="mini-select"></select>
             </label>
@@ -590,7 +598,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/cloud.js?v=yu-v3.35"></script>
-  <script src="js/app.js?v=yu-v3.35"></script>
+  <script src="js/cloud.js?v=yu-v3.36"></script>
+  <script src="js/app.js?v=yu-v3.36"></script>
 </body>
 </html>

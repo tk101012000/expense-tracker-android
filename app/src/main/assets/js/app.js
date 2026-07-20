@@ -108,8 +108,8 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.35';
-const APP_BUILD_DATE = '2026-07-20';
+const APP_VERSION = 'yu-v3.36';
+const APP_BUILD_DATE = '2026-07-21';
 
 /* ---------- 工具 ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1469,6 +1469,11 @@ function openSplitCalc() {
   $('#splitCalcModal').hidden = false;
   renderSplitCalc();
   fillSplitPayer();
+  // #6 修復：分擔入帳預設帶「扣款帳戶」與「類別」，避免交易顯示「未知帳戶」
+  fillAccountSelect($('#splitAccount'), DB.accounts[0] ? DB.accounts[0].id : '');
+  const sc = $('#splitCategory');
+  sc.innerHTML = '<option value="">未分類</option>' +
+    EXPENSE_CATS.map(c => `<option value="${c.name}">${c.icon} ${c.name}</option>`).join('');
   setTimeout(() => $('#splitTotal').focus(), 50);
 }
 
@@ -1607,13 +1612,15 @@ function recordSplitTxn() {
   if (!rows.length) { toast('請先新增參與人員'); return; }
 
   const paidBy = $('#splitPayer') ? ($('#splitPayer').value || '') : '';
+  const accId = $('#splitAccount') ? ($('#splitAccount').value || '') : '';
+  const cat = $('#splitCategory') ? ($('#splitCategory').value || '') : '';
   const breakdown = rows.map(r => `${r.name} ${Math.round(r.ratioPct * 10) / 10}% ${fmtMoney(r.amount)}`).join('、');
   const note = '分擔計算：' + breakdown;
 
   // 只保留允許欄位（#9 精神：避免寫入髒資料）
   const txn = {
     id: uid(), type: 'expense', amount: total, date: todayISO(),
-    category: '', accountId: '', note, paidBy, createdAt: Date.now(),
+    category: cat, accountId: accId, note, paidBy, createdAt: Date.now(),
   };
   const clean = {};
   TXN_ALLOWED_FIELDS.forEach(f => { if (f in txn) clean[f] = txn[f]; });
