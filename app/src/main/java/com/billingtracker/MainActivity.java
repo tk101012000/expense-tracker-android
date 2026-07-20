@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -40,6 +41,13 @@ public class MainActivity extends Activity {
     private boolean pageReady = false;
     private String pendingOAuth = null;
 
+    // OAuth PKCE 狀態：連接時由網頁傳來，回傳時要能找回 verifier 完成 token 交換。
+    // 存入 SharedPreferences 以在 App 被系統回收（WebView 重建）後仍可取回，
+    // 這是雲端登入「找不到授權資訊」反覆失敗的根因。
+    private SharedPreferences oauthPrefs;
+    private String pendingVerifier = null;
+    private String pendingProvider = null;
+
     // 注入網頁的 JS：攔截 <a download> 的 blob:/data: 點擊，把內容以 base64 轉交原生下載。
     // 這解決了 WebView 不會自動處理 blob 下載的問題（否則「匯出 JSON/CSV」在 App 內會假動作）。
     private static final String INJECT_DL =
@@ -65,6 +73,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         webView = findViewById(R.id.webview);
+        oauthPrefs = getSharedPreferences("bk_oauth", MODE_PRIVATE);
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);          // 啟用 localStorage（資料持久化）
@@ -147,10 +156,25 @@ public class MainActivity extends Activity {
         String stateKey = uri.getQueryParameter("state");
         String err = uri.getQueryParameter("error");
         if (code == null && err == null) return;
+
+        // 找回 PKCE verifier / provider：優先用記憶體，回退 SharedPreferences（App 被回收後仍可取回）
+        String verifier = pendingVerifier;
+        String provider = pendingProvider;
+        if (oauthPrefs != null) {
+            if (verifier == null) verifier = oauthPrefs.getString("verifier", "");
+            if (provider == null) provider = oauthPrefs.getString("provider", "");
+        }
+        // 用完即清，避免舊狀態干擾下次連接
+        pendingVerifier = null;
+        pendingProvider = null;
+        if (oauthPrefs != null) oauthPrefs.edit().clear().apply();
+
         String js = "window.BKOAuthBridge && window.BKOAuthBridge("
                 + JSONObject.quote(code == null ? "" : code) + ","
                 + JSONObject.quote(stateKey == null ? "" : stateKey) + ","
-                + JSONObject.quote(err == null ? "" : err) + ");";
+                + JSONObject.quote(err == null ? "" : err) + ","
+                + JSONObject.quote(verifier == null ? "" : verifier) + ","
+                + JSONObject.quote(provider == null ? "" : provider) + ");";
         // WebView 可能尚未就緒（cloud.js 尚未定義 BKOAuthBridge）：
         // 已載入則立即執行，否則暫存待 onPageFinished 補執行。
         if (pageReady) {
@@ -164,7 +188,17 @@ public class MainActivity extends Activity {
     private class NativeBridge {
         /** 以系統瀏覽器 / Chrome Custom Tabs 開啟 OAuth 授權頁 */
         @JavascriptInterface
-        public void openOAuth(String url) {
+        public void openOAuth(String url, String stateKey, String verifier, String provider) {
+            // 把 PKCE verifier 等 OAuth 狀態存起來，回傳時（可能 WebView 已重建）才能找回
+            pendingVerifier = verifier;
+            pendingProvider = provider;
+            if (oauthPrefs != null) {
+                oauthPrefs.edit()
+                    .putString("verifier", verifier == null ? "" : verifier)
+                    .putString("provider", provider == null ? "" : provider)
+                    .putString("state", stateKey == null ? "" : stateKey)
+                    .apply();
+            }
             try {
                 CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
                 tabs.launchUrl(MainActivity.this, Uri.parse(url));

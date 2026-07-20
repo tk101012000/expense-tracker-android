@@ -101,7 +101,9 @@
     // 改由 Android 端 BKNATIVE.openOAuth 以「系統瀏覽器 / Chrome Custom Tabs」開啟授權頁；
     // 非 App 環境（桌面瀏覽器）才退回原本的 location.href。
     if (window.BKNATIVE && typeof window.BKNATIVE.openOAuth === 'function') {
-      window.BKNATIVE.openOAuth(target);
+      // 把 PKCE verifier / provider / stateKey 一併交給原生層保存（SharedPreferences），
+      // 回傳時即使 WebView 被重建也能找回 verifier 完成 token 交換（雲端登入失敗的主因）。
+      window.BKNATIVE.openOAuth(target, stateKey, verifier, provider);
     } else {
       location.href = target;
     }
@@ -323,17 +325,21 @@
      完成後 Google 重定向到 REDIRECT（本託管頁），該頁在「非 WebView」環境下
      會以自訂 scheme billingtracker://oauth/callback 把 code/state 回傳給 App，
      MainActivity.onNewIntent 收到後呼叫此函式完成 token 交換。 */
-  window.BKOAuthBridge = async function (code, stateKey, err) {
+  window.BKOAuthBridge = async function (code, stateKey, err, verifier, provider) {
     if (!code) {
       if (err) toast('授權失敗：' + err);
       else toast('授權已取消');
       cleanup();
       return;
     }
-    const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
-    if (!raw) { toast('找不到授權資訊，請重新連接'); cleanup(); return; }
-    const { provider, verifier } = JSON.parse(raw);
-    sessionStorage.removeItem('bk_oauth_' + stateKey);
+    // 優先用原生層經 billingtracker:// 回傳時附帶的 verifier/provider（不依賴 WebView sessionStorage，
+    // 即使回傳過程中 WebView 被重建也能完成 token 交換）。若原生未提供，退回同上下文的 sessionStorage。
+    if (!verifier || !provider) {
+      const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
+      if (!raw) { toast('找不到授權資訊，請重新連接'); cleanup(); return; }
+      const o = JSON.parse(raw);
+      verifier = o.verifier; provider = o.provider;
+    }
     try {
       const tok = await exchange(provider, code, verifier);
       applyToken(provider, tok);
