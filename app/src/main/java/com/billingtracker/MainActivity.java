@@ -112,6 +112,13 @@ public class MainActivity extends Activity {
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
         ws.setAllowFileAccess(true);
+        // v3.30：移除 WebView UA 中的 "wv" 標記，使 Google OAuth 不再判定為「嵌入 WebView」
+        // 而報 disallowed_useragent。去掉後 UA 等同一般手機 Chrome，OAuth 流程與網頁版完全一致。
+        String ua = ws.getUserAgentString();
+        if (ua != null && ua.contains("wv")) {
+            ua = ua.replace("; wv", "").replace(";wv", "").replace(" wv", "").replace("wv;", "");
+            ws.setUserAgentString(ua);
+        }
 
         // 頁面載入完成後注入下載攔截腳本，讓網頁的「匯出」能真的存檔
         webView.setWebViewClient(new WebViewClient() {
@@ -213,8 +220,8 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 注入原生橋 BKNATIVE：網頁呼叫 BKNATIVE.openOAuth(url) 時，以系統瀏覽器 /
-        // Chrome Custom Tabs 開啟 OAuth 授權頁，避免嵌入 WebView 的 UA 被 Google 擋下（disallowed_useragent）。
+        // 注入原生橋 BKNATIVE：網頁呼叫 BKNATIVE.openOAuth(url) 時，由 App 內 WebView 直接導航
+        // 授權頁（v3.30 起不再用 Chrome Custom Tabs）；BKNATIVE.downloadFile 處理匯出下載。
         // 必須在 loadUrl 之前註冊，確保頁面首次執行 JS 時 window.BKNATIVE 已存在
         // （app.js 據此判斷是否跳過 Service Worker）。
         webView.addJavascriptInterface(new NativeBridge(), "BKNATIVE");
@@ -295,10 +302,14 @@ public class MainActivity extends Activity {
             Log.d("BKCloud", msg == null ? "" : msg);
         }
 
-        /** 以系統瀏覽器 / Chrome Custom Tabs 開啟 OAuth 授權頁 */
+        /** v3.30：直接在 App 內 WebView 完成 OAuth（與網頁版同一頁流程），
+         *  不再經由 Chrome Custom Tabs + 自訂 scheme 回傳——該跨程式鏈在多款 ROM 上靜默失敗，
+         *  正是歷版「有授權頁、按完沒連接、也沒訊息」的根因。配合 onCreate 中移除 UA 的 "wv" 標記，
+         *  Google 不再阻擋；授權完 Google 直接跳回本 App 的 https 來源（由 shouldInterceptRequest 服務），
+         *  網頁層 handleRedirect() 在同一頁完成 token 交換。 */
         @JavascriptInterface
         public void openOAuth(String url, String stateKey, String verifier, String provider) {
-            // 把 PKCE verifier 等 OAuth 狀態存起來，回傳時（可能 WebView 已重建）才能找回
+            // 把 PKCE verifier 等 OAuth 狀態存起來（作為備援；頁內流程主要依賴 sessionStorage）
             pendingVerifier = verifier;
             pendingProvider = provider;
             if (oauthPrefs != null) {
@@ -308,16 +319,8 @@ public class MainActivity extends Activity {
                     .putString("state", stateKey == null ? "" : stateKey)
                     .apply();
             }
-            try {
-                CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
-                tabs.launchUrl(MainActivity.this, Uri.parse(url));
-            } catch (Exception e) {
-                // Custom Tabs 不可用（如未安裝 Chrome）時，退回系統瀏覽器
-                try {
-                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                    MainActivity.this.startActivity(i);
-                } catch (Exception ignored) {}
-            }
+            Log.d("BKCloud", "openOAuth -> load in WebView (no Custom Tabs)");
+            runOnUiThread(() -> webView.loadUrl(url));
         }
 
         // v3.23.1：網頁「匯出 JSON / CSV」時，把 blob 內容以 base64 傳來，

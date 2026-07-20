@@ -125,7 +125,7 @@
     const stateKey = url.searchParams.get('state');
     const err = url.searchParams.get('error');
     if (!code) return false;
-    if (err) { toast('授權失敗：' + err); cleanup(); return true; }
+    if (err) { const m = '授權失敗：' + err; setStatus(m); toast(m); cleanup(); return true; }
 
     const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
     if (raw) {
@@ -140,7 +140,10 @@
         applyToken(provider, tok);
         toast('已連接 ' + PROVIDERS[provider].name);
       } catch (e) {
-        toast('連接失敗：' + (e.message || e));
+        // v3.30：錯誤同時寫入雲端狀態區，確保 App 內 WebView 路徑下一定看得到（不依賴 alert/toast）。
+        const m = '連接失敗：' + (e.message || e);
+        setStatus(m + '（請截圖回報）');
+        toast(m);
       }
       return true;
     }
