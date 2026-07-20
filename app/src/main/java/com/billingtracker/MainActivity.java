@@ -17,8 +17,8 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
-    // 改成你自己的部署網址即可（保留結尾斜線）
-    private static final String APP_URL = "https://tk101012000.github.io/expense-tracker/";
+    // 離線模式：直接載入打包進 assets 的網頁，不依賴任何外部網址，安裝後即永久可用
+    private static final String APP_URL = "file:///android_asset/index.html";
     private static final int REQ_FILE_CHOOSER = 100;
 
     private WebView webView;
@@ -68,9 +68,9 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 每次啟動都在網址後加 cache-buster，強迫 WebView 抓取最新網頁，
-        // 避免「要手動清快取才能更新」的問題。不影響 localStorage 資料。
-        webView.loadUrl(APP_URL + "?nocache=" + System.currentTimeMillis());
+        // 離線模式：直接載入打包進 assets 的網頁（不附加 cache-buster，
+        // assets 會隨 APK 一併更新，且本機資料 localStorage 不受影響）。
+        webView.loadUrl(APP_URL);
 
         // 注入原生橋 BKNATIVE：網頁呼叫 BKNATIVE.openOAuth(url) 時，以系統瀏覽器 /
         // Chrome Custom Tabs 開啟 OAuth 授權頁，避免嵌入 WebView 的 UA 被 Google 擋下（disallowed_useragent）

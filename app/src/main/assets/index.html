@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="繳費記帳" />
+  <title>繳費記帳 · 家庭理財助手</title>
+  <!-- #17 修復：Content-Security-Policy 限制資源來源，減少 XSS 攻擊面 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://api.dropboxapi.com https://content.dropboxapi.com https://www.googleapis.com; img-src 'self' data: blob:; frame-ancestor 'none'; base-uri 'self'; form-action 'self'" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- OAuth 回傳橋接：本頁若在「系統瀏覽器 / Chrome Custom Tabs」（非 App 內 WebView）載入，
+       且網址帶 ?code=（Google 授權回傳），則改以自訂 scheme 把 code/state 回傳給 Android App，
+       避開嵌入 WebView 的 disallowed_useragent。桌面瀏覽器（非 Android）不攔截，照常走 handleRedirect。 -->
+  <script>
+    (function () {
+      try {
+        var isNative = (typeof BKNATIVE !== 'undefined');
+        var isAndroid = /Android/i.test(navigator.userAgent);
+        var u = new URL(location.href);
+        if (!isNative && isAndroid && u.searchParams.get('code')) {
+          location.replace('billingtracker://oauth/callback' + location.search);
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div id="app">
+    <!-- 頂部列 -->
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="logo">💰</span>
+        <div>
+          <h1 id="viewTitle">總覽</h1>
+          <p id="viewSub" class="topbar-sub">今日 <span id="todayStr"></span></p>
+        </div>
+      </div>
+      <button class="icon-btn" id="reminderBtn" title="提醒">
+        🔔<span class="badge" id="reminderBadge" hidden>0</span>
+      </button>
+    </header>
+
+    <!-- 主內容 -->
+    <main id="main">
+      <!-- ============ 總覽 ============ -->
+      <section class="view" data-view="dashboard">
+        <div class="summary-cards">
+          <div class="card balance-card">
+            <p class="card-label">總資產</p>
+            <p class="card-value" id="totalAssets">¥0</p>
+            <p class="card-hint" id="assetsHint">跨所有帳戶</p>
+          </div>
+          <div class="mini-cards">
+            <div class="card mini income">
+              <p class="card-label">本月收入</p>
+              <p class="card-value" id="monthIncome">¥0</p>
+            </div>
+            <div class="card mini expense">
+              <p class="card-label">本月支出</p>
+              <p class="card-value" id="monthExpense">¥0</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="reminderPanel">
+          <div class="card-head">
+            <h2>待繳提醒</h2>
+            <span class="pill" id="reminderCount">0 筆</span>
+          </div>
+          <div id="dashReminders" class="reminder-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>本月支出佔比</h2>
+          </div>
+          <canvas id="dashDoughnut" height="220"></canvas>
+          <div id="dashLegend" class="legend"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>最近交易</h2>
+            <button class="link-btn" data-goto="records">查看全部</button>
+          </div>
+          <div id="recentList" class="txn-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ 記帳 ============ -->
+      <section class="view" data-view="records" hidden>
+        <div class="filter-bar">
+          <input type="search" id="searchKeyword" placeholder="🔍 搜尋備註 / 類別 / 金額" />
+          <button class="chip-btn" id="toggleFilters">篩選 ▾</button>
+        </div>
+        <div class="filter-panel" id="filterPanel" hidden>
+          <div class="field-row">
+            <label>起始日<input type="date" id="filterFrom" /></label>
+            <label>結束日<input type="date" id="filterTo" /></label>
+          </div>
+          <div class="field-row">
+            <label>類別
+              <select id="filterCategory"><option value="">全部類別</option></select>
+            </label>
+            <label>帳戶
+              <select id="filterAccount"><option value="">全部帳戶</option></select>
+            </label>
+          </div>
+          <div class="field-row">
+            <label>類型
+              <select id="filterType">
+                <option value="">全部</option>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </label>
+            <label>排序
+              <select id="sortBy">
+                <option value="date_desc">日期（新→舊）</option>
+                <option value="date_asc">日期（舊→新）</option>
+                <option value="amount_desc">金額（高→低）</option>
+                <option value="amount_asc">金額（低→高）</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row">
+            <label>付款人（誰付錢）
+              <select id="filterPaidBy"><option value="">全部付款人</option></select>
+            </label>
+          </div>
+          <button class="ghost-btn" id="clearFilters">清除篩選</button>
+        </div>
+        <div class="list-summary" id="recordsSummary"></div>
+        <div id="recordsList" class="txn-list"></div>
+      </section>
+
+      <!-- ============ 繳費 ============ -->
+      <section class="view" data-view="bills" hidden>
+        <div class="seg-tabs">
+          <button class="seg active" data-billfilter="all">全部</button>
+          <button class="seg" data-billfilter="unpaid">未繳</button>
+          <button class="seg" data-billfilter="paid">已繳</button>
+        </div>
+        <div id="billsList" class="bill-list"></div>
+        <button class="fab secondary" id="addBillBtn">＋ 新增繳費項目</button>
+      </section>
+
+      <!-- ============ 統計 ============ -->
+      <section class="view" data-view="stats" hidden>
+        <div class="month-picker">
+          <button class="icon-btn" id="prevMonth" type="button">◀</button>
+          <span id="statMonthLabel">2026-07</span>
+          <button class="icon-btn" id="nextMonth" type="button">▶</button>
+        </div>
+        <div class="stat-summary">
+          <div><span>支出</span><strong id="statExpense" class="expense-text">¥0</strong></div>
+          <div><span>收入</span><strong id="statIncome" class="income-text">¥0</strong></div>
+          <div><span>結餘</span><strong id="statNet">¥0</strong></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>近 6 個月支出趨勢</h2></div>
+          <canvas id="trendChart" height="220"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>本月類別佔比</h2></div>
+          <canvas id="statDoughnut" height="220"></canvas>
+          <div id="statLegend" class="legend"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>類別排行</h2></div>
+          <div id="categoryRank" class="rank-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ 帳戶 ============ -->
+      <section class="view" data-view="accounts" hidden>
+        <!-- v3.20 貨幣偏好卡 -->
+        <div class="card cur-card">
+          <div class="card-head"><h2>💱 貨幣單位</h2></div>
+          <div class="cur-picker" id="curPicker">
+            <button type="button" class="cur-trigger" id="curTrigger">
+              <span class="cur-sym-box" id="curSymbol">¥</span>
+              <span class="cur-trigger-text">
+                <span id="curCode" class="cur-code"></span>
+                <span id="curName" class="cur-name"></span>
+              </span>
+              <span class="cur-caret">▾</span>
+            </button>
+            <div class="cur-pop" id="curPop" hidden>
+              <input type="text" id="curSearch" class="cur-search" placeholder="搜尋貨幣名稱或代碼，例如 USD / 日圓" autocomplete="off" />
+              <div class="cur-list" id="curList"></div>
+            </div>
+          </div>
+          <p class="hint-text" id="curHint"></p>
+        </div>
+        <div id="accountsList" class="account-list"></div>
+        <button class="fab secondary" id="addAccountBtn">＋ 新增帳戶</button>
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>成員（誰付錢）</h2></div>
+          <div id="memberList" class="member-list"></div>
+          <button class="fab secondary" id="addMemberBtn" style="margin-top:10px">＋ 新增成員</button>
+          <div class="split-box">
+            <div class="card-head" style="margin-top:14px">
+              <h2>成員分帳統計</h2>
+              <select id="splitPeriod" class="mini-select">
+                <option value="all">全部</option>
+                <option value="month">本月</option>
+                <option value="custom">自訂範圍</option>
+              </select>
+            </div>
+            <div id="splitRange" class="split-range" hidden>
+              <label class="range-field">起 <input type="date" id="splitStart" class="mini-input" /></label>
+              <label class="range-field">止 <input type="date" id="splitEnd" class="mini-input" /></label>
+            </div>
+            <div id="memberSplit" class="split-list"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>📊 成員分擔統計</h2>
+            <button class="ghost-btn small" id="contribExportBtn" type="button">匯出報表</button>
+          </div>
+          <p class="hint-text" style="margin-top:0">統計每位成員新增的項目數與分擔比例，依時間區間篩選。</p>
+          <div class="seg-tabs" id="contribRange" style="margin:10px 0 14px">
+            <button class="seg active" data-range="all">全部</button>
+            <button class="seg" data-range="day">日</button>
+            <button class="seg" data-range="week">週</button>
+            <button class="seg" data-range="month">月</button>
+          </div>
+          <div class="contrib-summary" id="contribSummary"></div>
+          <div class="contrib-charts">
+            <div class="contrib-col">
+              <div class="contrib-sub">各成員項目數</div>
+              <div id="contribBars" class="contrib-bars"></div>
+            </div>
+            <div class="contrib-col">
+              <div class="contrib-sub">分擔比例</div>
+              <div id="contribDonut" class="contrib-donut"></div>
+            </div>
+          </div>
+          <div class="contrib-detail" id="contribDetail"></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>💸 每人應付（分擔結算）</h2>
+            <button class="ghost-btn small" id="payExportBtn" type="button">匯出報表</button>
+          </div>
+          <p class="hint-text" style="margin-top:0">依據記帳與繳費中的「多人分擔」，結算每位成員應付金額與淨收支（誰該付給誰）。</p>
+          <div class="card-head" style="margin-top:6px">
+            <select id="payPeriod" class="mini-select">
+              <option value="all">全部</option>
+              <option value="month">本月</option>
+              <option value="custom">自訂範圍</option>
+            </select>
+          </div>
+          <div id="payRange" class="split-range" hidden>
+            <label class="range-field">起 <input type="date" id="payStart" class="mini-input" /></label>
+            <label class="range-field">止 <input type="date" id="payEnd" class="mini-input" /></label>
+          </div>
+          <div id="paySettle" class="pay-list"></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>🧮 分擔計算機</h2></div>
+          <p class="hint-text" style="margin-top:0">輸入總金額與參與人員，立即算出品每人應付金額（平均分擔或自訂比例）。</p>
+          <button class="ghost-btn" id="openSplitCalc" style="width:100%">開啟計算機</button>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>資料管理</h2></div>
+          <div class="data-actions">
+            <button class="ghost-btn" id="exportCsvBtn">匯出 CSV</button>
+            <button class="ghost-btn" id="exportJsonBtn">匯出 JSON</button>
+            <button class="ghost-btn" id="importBtn">匯入 JSON</button>
+            <button class="danger-btn" id="resetBtn">清空資料</button>
+          </div>
+          <input type="file" id="importFile" accept="application/json" hidden />
+          <div class="import-text-box">
+            <label class="field">或直接貼上 JSON 文字（手機 / WebView 適用）
+              <textarea id="importText" rows="4" placeholder="在此貼上備份的 JSON 內容…"></textarea>
+            </label>
+            <button class="ghost-btn" id="importTextBtn" type="button">從文字匯入</button>
+          </div>
+          <p class="hint-text">所有資料僅儲存在本裝置瀏覽器（localStorage），不會上傳。</p>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-head"><h2>☁️ 雲端備份</h2></div>
+          <label class="field">雲端服務
+            <select id="cloudProvider">
+              <option value="drive">Google Drive</option>
+              <option value="dropbox">Dropbox</option>
+            </select>
+          </label>
+          <label class="field">Client ID / App Key
+            <input type="text" id="cloudClientId" placeholder="貼上你的 OAuth Client ID" autocomplete="off" />
+          </label>
+          <label class="field">Client Secret
+            <input type="password" id="cloudClientSecret" placeholder="用戶端密鑰（依 OAuth 應用類型，部分才需要）" autocomplete="off" />
+          </label>
+          <p class="hint-text" id="cloudRedirectHint"></p>
+          <p class="hint-text">需先在該服務的開發者後台建立 OAuth 應用，並將「重新導向網址」設為上方網址，否則無法登入。</p>
+          <div class="data-actions" style="margin-top:8px">
+            <button class="ghost-btn" id="cloudConnectBtn">連接雲端</button>
+            <button class="ghost-btn" id="cloudUploadBtn" disabled>上傳備份</button>
+            <button class="ghost-btn" id="cloudDownloadBtn" disabled>下載還原</button>
+            <button class="danger-btn" id="cloudDisconnectBtn" disabled>斷線</button>
+          </div>
+          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.21]</small></p>
+          <p class="hint-text">備份內容為完整資料（帳戶／交易／繳費）的 JSON，儲存於你的雲端硬碟私人空間；採用客戶端 OAuth（PKCE），不經過任何第三方伺服器。</p>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="appVersion">v—</span>
+        <span id="appBuildDate"></span>
+      </footer>
+    </main>
+
+    <!-- 底部導覽 -->
+    <nav class="tabbar">
+      <button class="tab active" data-view="dashboard"><span>🏠</span>總覽</button>
+      <button class="tab" data-view="records"><span>📒</span>記帳</button>
+      <button class="tab fab-tab" id="fabAdd">＋</button>
+      <button class="tab" data-view="bills"><span>📅</span>繳費</button>
+      <button class="tab" data-view="stats"><span>📊</span>統計</button>
+      <button class="tab" data-view="accounts"><span>💳</span>帳戶</button>
+    </nav>
+  </div>
+
+  <!-- ============ 交易編輯彈窗 ============ -->
+  <div class="modal" id="txnModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="txnModalTitle">新增交易</h3>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+      <form id="txnForm" class="modal-body">
+        <div class="type-toggle">
+          <button type="button" class="tt-btn active" data-ttype="expense">支出</button>
+          <button type="button" class="tt-btn" data-ttype="income">收入</button>
+        </div>
+        <label class="field">金額 <span class="req">*</span>
+          <input type="number" id="txnAmount" step="0.01" min="0" inputmode="decimal" placeholder="0.00" />
+          <small class="err" id="errAmount"></small>
+        </label>
+        <label class="field">日期 <span class="req">*</span>
+          <input type="date" id="txnDate" />
+          <small class="err" id="errDate"></small>
+        </label>
+        <label class="field">類別 <span class="req">*</span>
+          <select id="txnCategory"></select>
+        </label>
+        <label class="field">帳戶 <span class="req">*</span>
+          <select id="txnAccount"></select>
+        </label>
+        <label class="field">付款人（誰付錢）
+          <select id="txnPaidBy"><option value="">未指定</option></select>
+        </label>
+        <div id="txnSplitWrap">
+          <label class="field field-toggle">
+            <span>多人分擔（此筆由多人分攤）</span>
+            <input type="checkbox" id="txnSplitOn" />
+          </label>
+          <div class="split-editor" id="txnSplitBox" hidden>
+            <div class="seg-tabs" id="txnSplitMode">
+              <button type="button" class="seg active" data-mode="equal">平均分攤</button>
+              <button type="button" class="seg" data-mode="ratio">自訂比例</button>
+            </div>
+            <div id="txnSplitParts" class="split-parts"></div>
+            <div class="split-editor-actions">
+              <button type="button" class="ghost-btn small" id="txnSplitAdd">＋ 加入分擔人</button>
+              <button type="button" class="ghost-btn small" id="txnSplitFromMembers">從成員匯入</button>
+            </div>
+            <div class="pill" id="txnSplitValidation"></div>
+          </div>
+        </div>
+        <label class="field">備註
+          <input type="text" id="txnNote" maxlength="60" placeholder="選填，最多 60 字" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="deleteTxnBtn" hidden>刪除</button>
+          <button type="submit" class="primary-btn">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ 帳戶編輯彈窗 ============ -->
+  <div class="modal" id="accountModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="accountModalTitle">新增帳戶</h3>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+      <form id="accountForm" class="modal-body">
+        <label class="field">帳戶名稱 <span class="req">*</span>
+          <input type="text" id="accName" maxlength="20" placeholder="例：中國信託" />
+          <small class="err" id="errAccName"></small>
+        </label>
+        <label class="field">類型 <span class="req">*</span>
+          <select id="accType">
+            <option value="cash">現金</option>
+            <option value="bank">銀行</option>
+            <option value="credit">信用卡</option>
+          </select>
+        </label>
+        <label class="field">初始餘額
+          <input type="number" id="accBalance" step="0.01" placeholder="0.00" />
+        </label>
+        <label class="field">備註
+          <input type="text" id="accNote" maxlength="40" placeholder="選填" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="deleteAccBtn" hidden>刪除</button>
+          <button type="submit" class="primary-btn">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ 繳費編輯彈窗 ============ -->
+  <div class="modal" id="billModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="billModalTitle">新增繳費項目</h3>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+      <form id="billForm" class="modal-body">
+        <label class="field">項目名稱 <span class="req">*</span>
+          <input type="text" id="billName" maxlength="20" placeholder="例：台電電費" />
+          <small class="err" id="errBillName"></small>
+        </label>
+        <label class="field">金額 <span class="req">*</span>
+          <input type="number" id="billAmount" step="0.01" min="0" inputmode="decimal" placeholder="0.00" />
+          <small class="err" id="errBillAmount"></small>
+        </label>
+        <label class="field">類別
+          <select id="billCategory"><option value="">未分類</option></select>
+        </label>
+        <label class="field">扣款帳戶
+          <select id="billAccount"><option value="">未指定</option></select>
+        </label>
+        <div class="field-row">
+          <label class="field">週期
+            <select id="billCycle">
+              <option value="">未設定</option>
+              <option value="monthly">每月</option>
+              <option value="quarterly">每季</option>
+              <option value="yearly">每年</option>
+            </select>
+          </label>
+          <label class="field">首次到期日
+            <input type="date" id="billDue" placeholder="選填" />
+          </label>
+        </div>
+        <small class="err" id="errBillDue"></small>
+        <label class="field">備註
+          <input type="text" id="billNote" maxlength="40" placeholder="選填" />
+        </label>
+        <div id="billSplitWrap">
+          <label class="field field-toggle">
+            <span>多人分擔（此筆由多人分攤）</span>
+            <input type="checkbox" id="billSplitOn" />
+          </label>
+          <div class="split-editor" id="billSplitBox" hidden>
+            <div class="seg-tabs" id="billSplitMode">
+              <button type="button" class="seg active" data-mode="equal">平均分攤</button>
+              <button type="button" class="seg" data-mode="ratio">自訂比例</button>
+            </div>
+            <div id="billSplitParts" class="split-parts"></div>
+            <div class="split-editor-actions">
+              <button type="button" class="ghost-btn small" id="billSplitAdd">＋ 加入分擔人</button>
+              <button type="button" class="ghost-btn small" id="billSplitFromMembers">從成員匯入</button>
+            </div>
+            <div class="pill" id="billSplitValidation"></div>
+          </div>
+        </div>
+        <label class="field field-toggle">
+          <span>標記為已繳</span>
+          <input type="checkbox" id="billPaidNow" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="deleteBillBtn" hidden>刪除</button>
+          <button type="submit" class="primary-btn">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ 成員編輯彈窗 ============ -->
+  <div class="modal" id="memberModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="memberModalTitle">新增成員</h3>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+      <form id="memberForm" class="modal-body">
+        <label class="field">成員名稱 <span class="req">*</span>
+          <input type="text" id="memberName" maxlength="20" placeholder="例：本人、配偶、小孩" />
+          <small class="err" id="errMemberName"></small>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="deleteMemberBtn" hidden>刪除</button>
+          <button type="submit" class="primary-btn">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ 分擔計算機彈窗 ============ -->
+  <div class="modal" id="splitCalcModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>🧮 分擔計算機</h3>
+        <button class="icon-btn" type="button" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">總金額 <span class="req">*</span>
+          <input type="number" id="splitTotal" step="0.01" min="0" inputmode="decimal" placeholder="0.00" />
+          <small class="err" id="errSplitTotal"></small>
+        </label>
+        <div class="seg-tabs" id="splitModeTabs">
+          <button class="seg active" data-splitmode="equal">平均分擔</button>
+          <button class="seg" data-splitmode="ratio">自訂比例</button>
+        </div>
+        <div id="splitParts" class="split-parts"></div>
+        <div class="data-actions" style="margin-top:4px">
+          <button class="ghost-btn" id="addSplitPart" type="button">＋ 新增人員</button>
+          <button class="ghost-btn" id="splitFromMembers" type="button">從成員匯入</button>
+        </div>
+        <div class="split-result-box">
+          <div class="card-head" style="margin:0 0 10px">
+            <h2>分擔結果</h2>
+            <span class="pill" id="splitValidation"></span>
+          </div>
+          <div id="splitResults" class="split-result-list"></div>
+          <div class="split-total" id="splitResultTotal"></div>
+          <div class="split-record-row">
+            <label class="inline-field">付款人
+              <select id="splitPayer" class="mini-select"></select>
+            </label>
+            <button class="fab" id="splitRecordBtn" type="button">＋ 一鍵入帳</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/cloud.js?v=yu-3.17"></script>
+  <script src="js/app.js?v=yu-3.21"></script>
+</body>
+</html>
