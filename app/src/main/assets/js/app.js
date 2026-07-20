@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.32';
+const APP_VERSION = 'yu-v3.33';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -1818,7 +1818,7 @@ function validateAndSanitize(parsed) {
     parsed.bills = [];
   }
   if (Array.isArray(parsed.members)) {
-    parsed.members = parsed.members.map(m => sanitizeObj(m, MEMBER_ALLOWED_KEYS));
+    parsed.members = parsed.members.map(m => sanitizeObj(m, MEMBER_ALLOWED_FIELDS));
   } else {
     parsed.members = [];
   }

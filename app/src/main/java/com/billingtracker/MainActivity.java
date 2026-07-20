@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
@@ -27,6 +28,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collections;
@@ -44,6 +46,7 @@ public class MainActivity extends Activity {
     private static final String URL_PREFIX = "/expense-tracker/";
     private static final String APP_URL = "https://tk101012000.github.io/expense-tracker/index.html";
     private static final int REQ_FILE_CHOOSER = 100;
+    private static final int REQ_STORAGE = 101;   // #3 修復：API<29 匯出需執行期儲存權限
 
     private WebView webView;
     // 檔案選擇器的回傳 callback（Android 5+ 用 Uri[]）
@@ -335,10 +338,23 @@ public class MainActivity extends Activity {
                     values.put(MediaStore.Downloads.MIME_TYPE, mime);
                     values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
                     Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri == null) throw new IOException("無法在下載資料夾建立檔案");  // #2 修復：insert 回傳 null 時避免 NPE
                     try (OutputStream os = getContentResolver().openOutputStream(uri)) {
                         os.write(data);
                     }
                 } else {
+                    // #3 修復：API 24–28 需 WRITE_EXTERNAL_STORAGE 執行期權限
+                    if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        final String fn = filename;
+                        runOnUiThread(() -> {
+                            if (shouldShowRequestPermissionRationale(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                                showToast("需要儲存權限才能匯出檔案，請授予後重試");
+                            }
+                            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                        });
+                        return;  // 等使用者授權後再次匯出即可
+                    }
                     File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                     File out = new File(dir, filename);
                     try (FileOutputStream fos = new FileOutputStream(out)) {
@@ -412,6 +428,20 @@ public class MainActivity extends Activity {
             filePathCallback = null;
         } else {
             super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    // #3 修復：API<29 匯出儲存權限的回傳；授權結果不會自動重試匯出，提示使用者再次操作即可
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == REQ_STORAGE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showToast("已授權儲存權限，請再次點擊匯出");
+            } else {
+                showToast("未授予儲存權限，無法匯出檔案");
+            }
+        } else {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         }
     }
 
