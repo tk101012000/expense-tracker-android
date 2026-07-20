@@ -33,6 +33,16 @@
 </head>
 <body>
   <div id="app">
+    <!-- iOS 加到主畫面引導（僅 iOS 且未獨立模式時顯示） -->
+    <div class="ios-hint" id="iosHint" hidden>
+      <span class="ios-hint-close" id="iosHintClose" role="button" aria-label="關閉">✕</span>
+      <div class="ios-hint-icon">📲</div>
+      <div class="ios-hint-body">
+        <p class="ios-hint-title">把這個 App 加到主畫面</p>
+        <p class="ios-hint-text">點下方的 <b>分享 ⤴</b> → <b>「加入主畫面」</b>，就能像原生 App 一樣全螢幕使用，登入也不會被擋。</p>
+      </div>
+    </div>
+
     <!-- 頂部列 -->
     <header class="topbar">
       <div class="topbar-title">
@@ -309,7 +319,7 @@
             <button class="ghost-btn" id="cloudDownloadBtn" disabled>下載還原</button>
             <button class="danger-btn" id="cloudDisconnectBtn" disabled>斷線</button>
           </div>
-          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.21]</small></p>
+          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.24]</small></p>
           <p class="hint-text">備份內容為完整資料（帳戶／交易／繳費）的 JSON，儲存於你的雲端硬碟私人空間；採用客戶端 OAuth（PKCE），不經過任何第三方伺服器。</p>
         </div>
       </section>
@@ -356,6 +366,9 @@
         </label>
         <label class="field">帳戶 <span class="req">*</span>
           <select id="txnAccount"></select>
+        </label>
+        <label class="field">幣別
+          <select id="txnCurrency"></select>
         </label>
         <label class="field">付款人（誰付錢）
           <select id="txnPaidBy"><option value="">未指定</option></select>
@@ -437,6 +450,9 @@
         <label class="field">金額 <span class="req">*</span>
           <input type="number" id="billAmount" step="0.01" min="0" inputmode="decimal" placeholder="0.00" />
           <small class="err" id="errBillAmount"></small>
+        </label>
+        <label class="field">幣別
+          <select id="billCurrency"></select>
         </label>
         <label class="field">類別
           <select id="billCategory"><option value="">未分類</option></select>
@@ -553,7 +569,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/cloud.js?v=yu-3.17"></script>
-  <script src="js/app.js?v=yu-3.21"></script>
+  <script src="js/cloud.js?v=yu-3.24"></script>
+  <script src="js/app.js?v=yu-v3.24"></script>
 </body>
 </html>

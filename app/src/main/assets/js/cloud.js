@@ -107,19 +107,33 @@
     const err = url.searchParams.get('error');
     if (!code) return false;
     if (err) { toast('授權失敗：' + err); cleanup(); return true; }
+
     const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
-    if (!raw) { toast('找不到授權資訊，請重新連接'); cleanup(); return true; }
-    const { provider, verifier } = JSON.parse(raw);
-    sessionStorage.removeItem('bk_oauth_' + stateKey);
-    // 清除網址列中的 code，避免重新整理重複交換
-    history.replaceState({}, document.title, REDIRECT);
-    try {
-      const tok = await exchange(provider, code, verifier);
-      applyToken(provider, tok);
-      toast('已連接 ' + PROVIDERS[provider].name);
-    } catch (e) {
-      toast('連接失敗：' + (e.message || e));
+    if (raw) {
+      // 與發起 OAuth 同一瀏覽上下文（桌面 / 手機瀏覽器 / iPhone Safari）：
+      // 直接在此完成 token 交換，token 會存進當前頁面的 localStorage。
+      const { provider, verifier } = JSON.parse(raw);
+      sessionStorage.removeItem('bk_oauth_' + stateKey);
+      // 清除網址列中的 code，避免重新整理重複交換
+      history.replaceState({}, document.title, REDIRECT);
+      try {
+        const tok = await exchange(provider, code, verifier);
+        applyToken(provider, tok);
+        toast('已連接 ' + PROVIDERS[provider].name);
+      } catch (e) {
+        toast('連接失敗：' + (e.message || e));
+      }
+      return true;
     }
+
+    // 不在同一瀏覽上下文（Android App 經由系統瀏覽器 / Chrome Custom Tabs 授權）：
+    // 此時 token 若在此交換只會存進「系統瀏覽器」的 localStorage，App 的 WebView 讀不到，
+    // 因此把授權碼經由自訂 scheme 回傳給 App 原生層，由原生層注入 BKOAuthBridge
+    // 在「App 的 WebView」內完成交換，token 才會正確存進 App。
+    const cb = 'billingtracker://oauth/callback?code=' + encodeURIComponent(code) +
+               '&state=' + encodeURIComponent(stateKey);
+    cleanup();
+    location.href = cb;
     return true;
   }
   function cleanup() { history.replaceState({}, document.title, REDIRECT); }

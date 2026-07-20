@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.21';
+const APP_VERSION = 'yu-v3.24';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -123,6 +123,15 @@ function isoLocal(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 const monthKey = d => (d || todayISO()).slice(0, 7);
 // v3.20：依選定貨幣的小數位格式化（JPY/KRW 不顯示小數，其餘 2 位）
 const fmtMoney = n => CURRENCY + (n < 0 ? '-' : '') + Math.abs(Number(n) || 0).toLocaleString('zh-TW', { minimumFractionDigits: CUR_DECIMALS, maximumFractionDigits: CUR_DECIMALS });
+// v3.23：用指定幣別代碼格式化金額（單筆交易/繳費顯示用）
+const fmtMoneyCur = (n, code) => {
+  const m = getCurrencyMeta(code);
+  const sym = m ? m.symbol : CURRENCY;
+  const dec = m ? m.decimals : CUR_DECIMALS;
+  return sym + (n < 0 ? '-' : '') + Math.abs(Number(n) || 0).toLocaleString('zh-TW', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+};
+// v3.23：若交易/繳費的幣別與全域不同，顯示幣別標籤
+const curBadge = (code) => (code && code !== DB.settings.currency) ? `<small class="cur-badge">${code}</small>` : '';
 const fmtDate = d => { const dt = new Date(d + 'T00:00:00'); return `${dt.getMonth() + 1}/${dt.getDate()}`; };
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -168,6 +177,32 @@ function load() {
   DB.settings.currency = getCurrencyMeta(savedCode) ? savedCode : detectDefaultCurrency();
   applyCurrency();
   _balanceDirty = true;
+}
+
+/* ---------- iOS 加到主畫面引導 ---------- */
+// 偵測 iOS / iPadOS（含 iPadOS 13+ 以 Macintosh 偽裝的狀況）
+function isIOSDevice() {
+  const ua = navigator.userAgent;
+  const iOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const iPadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  return iOS || iPadOS;
+}
+function isStandalone() {
+  return ('standalone' in navigator) && navigator.standalone === true;
+}
+const IOS_HINT_KEY = 'iosHintDismissed';
+function maybeShowIosHint() {
+  const box = $('#iosHint');
+  const close = $('#iosHintClose');
+  if (!box) return;
+  // 只在 iOS 且尚未以獨立模式（加到主畫面）執行時顯示；已關閉過則不再提示
+  if (!isIOSDevice() || isStandalone()) { box.hidden = true; return; }
+  try { if (localStorage.getItem(IOS_HINT_KEY) === '1') { box.hidden = true; return; } } catch (_) { /* ignore */ }
+  box.hidden = false;
+  if (close) close.addEventListener('click', () => {
+    box.hidden = true;
+    try { localStorage.setItem(IOS_HINT_KEY, '1'); } catch (_) { /* ignore */ }
+  });
 }
 // #8 修復：save() 回傳 boolean，讓呼叫方能判斷是否成功
 function save() {
@@ -337,7 +372,7 @@ function txnRowHtml(t) {
       <div class="txn-cat">${escapeHtml(t.category)}</div>
       <div class="txn-meta">${fmtDate(t.date)} · ${acc ? escapeHtml(acc.name) : '未知帳戶'}${t.note ? ' · ' + escapeHtml(t.note) : ''}${payerHtml(t)}${sp ? ' · ' + escapeHtml(sp) : ''}</div>
     </div>
-    <div class="txn-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${fmtMoney(t.amount)}</div>
+    <div class="txn-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${fmtMoneyCur(t.amount, t.currency || '')}${curBadge(t.currency || '')}</div>
   </div>`;
 }
 // 交易列上的「付款人」標籤
@@ -537,6 +572,16 @@ function renderCurList(q) {
       </button>`).join('')
     : '<div class="empty">找不到相符的貨幣</div>';
 }
+/* ---------- 表單幣別選單（txn / bill 彈窗用）---------- */
+// 填充 <select id="..."> 的幣別下拉選項；selectedCode 為預設值（空 = 依全域設定）
+function fillCurrencySelect(sel, selectedCode) {
+  if (!sel) return;
+  const def = selectedCode || DB.settings.currency || CURRENCIES[0].code;
+  sel.innerHTML = CURRENCIES.map(c =>
+    `<option value="${c.code}" ${c.code === def ? 'selected' : ''}>${c.code} · ${c.zh}</option>`
+  ).join('');
+}
+
 function bindCurrencyPicker() {
   const trigger = $('#curTrigger');
   const pop = $('#curPop');
@@ -852,6 +897,7 @@ function openTxnModal(id) {
     fillCategorySelect($('#txnCategory'), t.type, t.category);
     fillAccountSelect($('#txnAccount'), t.accountId);
     fillMemberSelect($('#txnPaidBy'), t.paidBy, false);
+    fillCurrencySelect($('#txnCurrency'), t.currency);
   } else {
     txnType = 'expense';
     $('#txnAmount').value = '';
@@ -860,6 +906,7 @@ function openTxnModal(id) {
     setTxnType('expense');
     fillAccountSelect($('#txnAccount'), DB.accounts[0] && DB.accounts[0].id);
     fillMemberSelect($('#txnPaidBy'), DB.members[0] ? DB.members[0].id : '', false);
+    fillCurrencySelect($('#txnCurrency'), ''); // 預設用全域設定幣別
   }
   // 載入分擔狀態（收入不支援分擔，隱藏編輯器）
   splitEditorLoad(txnSplit, id ? DB.txns.find(x => x.id === id) : null);
@@ -895,6 +942,7 @@ function saveTxn(e) {
     type: txnType, amount: Math.round(amount * 100) / 100, date,
     category: $('#txnCategory').value, accountId: $('#txnAccount').value,
     note: $('#txnNote').value.trim(), paidBy: paidBy || '',
+    currency: $('#txnCurrency').value || DB.settings.currency || CURRENCIES[0].code,
     // 收入不支援分擔；支出才帶 splitMode/shares
     ...splitEditorToData(txnSplit, txnType === 'expense'),
   };
@@ -1590,11 +1638,13 @@ function openBillModal(id) {
     $('#billName').value = b.name; $('#billAmount').value = b.amount;
     $('#billCategory').value = b.category || ''; $('#billAccount').value = b.accountId || '';
     $('#billCycle').value = b.cycle || ''; $('#billDue').value = b.dueDate || ''; $('#billNote').value = b.note || '';
+    fillCurrencySelect($('#billCurrency'), b.currency);
     // 編輯時：若當期已繳則勾選
     try { const occ = currentOccurrence(b); $('#billPaidNow').checked = !!(b.paid && b.paid[occ.periodKey]); } catch(e) { $('#billPaidNow').checked = false; }
   } else {
     $('#billName').value = ''; $('#billAmount').value = '';
     $('#billCycle').value = ''; $('#billDue').value = ''; $('#billNote').value = '';
+    fillCurrencySelect($('#billCurrency'), ''); // 預設用全域設定幣別
     $('#billPaidNow').checked = false;
   }
   // 載入分擔狀態（繳費恆為支出，必定支援分擔）
@@ -1621,6 +1671,7 @@ function saveBill(e) {
     cycle: $('#billCycle').value || null,
     dueDate: $('#billDue').value || null,
     note: $('#billNote').value.trim(),
+    currency: $('#billCurrency').value || DB.settings.currency || CURRENCIES[0].code,
     // 繳費恆為支出，必定支援分擔
     ...splitEditorToData(billSplit, true),
   };
@@ -1713,9 +1764,9 @@ function exportCSV() {
 // #9 修復：匯入 schema 白名單校驗，攔截 prototype pollution 與欄位缺失
 const IMPORT_ALLOWED_TOP_KEYS = ['accounts', 'txns', 'bills', 'members', 'settings'];
 const TXN_REQUIRED_FIELDS = ['id', 'type', 'amount', 'date'];
-const TXN_ALLOWED_FIELDS = ['id', 'type', 'amount', 'date', 'category', 'accountId', 'note', 'createdAt', 'paidBy', '_fromBill', 'splitMode', 'shares'];
+const TXN_ALLOWED_FIELDS = ['id', 'type', 'amount', 'date', 'category', 'accountId', 'note', 'createdAt', 'paidBy', '_fromBill', 'splitMode', 'shares', 'currency'];
 const ACC_ALLOWED_FIELDS = ['id', 'name', 'type', 'balance', 'note'];
-const BILL_ALLOWED_FIELDS = ['id', 'name', 'amount', 'category', 'accountId', 'cycle', 'dueDate', 'note', 'paid', 'splitMode', 'shares'];
+const BILL_ALLOWED_FIELDS = ['id', 'name', 'amount', 'category', 'accountId', 'cycle', 'dueDate', 'note', 'paid', 'splitMode', 'shares', 'currency'];
 const MEMBER_ALLOWED_FIELDS = ['id', 'name'];
 
 /** 清理物件，只保留白名單 key，過濾 __proto__/constructor */
@@ -1971,6 +2022,7 @@ function init() {
   fillAccountSelect($('#filterAccount'), '', true);
   fillMemberSelect($('#filterPaidBy'), '', true);
   bindEvents();
+  maybeShowIosHint();
   renderCurrencyPicker();
   switchView('dashboard');
   // 雲端模組（處理 OAuth 回跳、綁定 UI）

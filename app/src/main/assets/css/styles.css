@@ -399,3 +399,56 @@ canvas { display: block; width: 100% !important; }
 .cur-opt-code { font-weight: 700; font-size: 14px; }
 .cur-opt-name { font-size: 12px; color: var(--text-3); }
 
+/* ---------- iOS 加到主畫面引導 ---------- */
+.ios-hint {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0,0,0,.15);
+}
+.ios-hint[hidden] { display: none; }
+.ios-hint-close {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.2);
+  color: #fff;
+  font-size: 13px;
+  line-height: 22px;
+  text-align: center;
+  cursor: pointer;
+}
+.ios-hint-icon { flex: none; font-size: 26px; line-height: 1; }
+.ios-hint-body { flex: 1; min-width: 0; }
+.ios-hint-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+.ios-hint-text { margin: 0; font-size: 12.5px; line-height: 1.45; opacity: .95; }
+.ios-hint-text b { color: #fff; }
+@media (max-width: 480px) {
+  .ios-hint { padding: 10px 12px; }
+  .ios-hint-text { font-size: 12px; }
+}
+
+/* ---------- 表單幣別選單（txn/bill 彈窗）---------- */
+.cur-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .2px;
+  vertical-align: middle;
+}
+/* 幣別 select 與其他表單欄位統一樣式 */
+select#txnCurrency, select#billCurrency { max-width: none; }
+
