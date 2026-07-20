@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.26';
+const APP_VERSION = 'yu-v3.27';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -2027,8 +2027,17 @@ function init() {
   switchView('dashboard');
   // 雲端模組（處理 OAuth 回跳、綁定 UI）
   if (window.Cloud) Cloud.init();
-  // 註冊 service worker
-  if ('serviceWorker' in navigator) {
+  // 註冊 service worker。
+  // App 內（window.BKNATIVE 存在）改由原生 shouldInterceptRequest 提供本地 assets 離線，
+  // 不需 SW；且 SW 快取會攔截 https://tk101012000.github.io 的請求，可能干擾原生攔截與
+  // Google/Dropbox API 呼叫，故 App 內一律跳過並主動反註冊既有 SW。
+  if (window.BKNATIVE) {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(rs => rs.forEach(r => r.unregister()))
+        .catch(() => { });
+    }
+  } else if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
   // 頁尾版本號

@@ -15,6 +15,8 @@ import android.view.KeyEvent;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -24,12 +26,22 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Collections;
 
 public class MainActivity extends Activity {
 
-    // 離線模式：直接載入打包進 assets 的網頁，不依賴任何外部網址，安裝後即永久可用
-    private static final String APP_URL = "file:///android_asset/index.html";
+    // v3.27：改以「合法 https 來源」載入網頁，實際內容仍由打包進 assets 的檔案提供
+    // （見 shouldInterceptRequest）。原因：離線 file:// 來源在發出 fetch 時 Origin 為 null，
+    // Google OAuth token 端點與 Drive API 一律以 CORS 拒絕（Origin: null），導致「有跳回 App
+    // 但雲端仍尚未連接」。改用註冊過的 https://tk101012000.github.io 來源後，CORS 通過，
+    // token 交換 / 上傳 / 下載皆可運作；UI 資源仍離線由 assets 提供。
+    private static final String APP_HOST = "tk101012000.github.io";
+    // URL 路徑前綴 /expense-tracker/ 會被剝除，剩餘部分直接對應 assets 根目錄下的檔案
+    // （assets 維持扁平：index.html、js/、css/、icons/…），無需重整目錄。
+    private static final String URL_PREFIX = "/expense-tracker/";
+    private static final String APP_URL = "https://tk101012000.github.io/expense-tracker/index.html";
     private static final int REQ_FILE_CHOOSER = 100;
 
     private WebView webView;
@@ -47,6 +59,18 @@ public class MainActivity extends Activity {
     private SharedPreferences oauthPrefs;
     private String pendingVerifier = null;
     private String pendingProvider = null;
+
+    // v3.27 一次性資料遷移：舊版以 file:// 為來源，localStorage 綁在 file:// origin；
+    // 新版改用 https://tk101012000.github.io origin，兩者 localStorage 互不相通，
+    // 若不遷移，升級後使用者的帳目會「消失」。故首次啟動時先載入舊 file:// 頁面
+    // 讀出 localStorage，再載入 https 頁面把資料寫入新 origin（僅做一次，之後直載 https）。
+    private static final String OLD_FILE_URL = "file:///android_asset/index.html";
+    private static final String DUMP_JS =
+        "(function(){var o={};for(var i=0;i<localStorage.length;i++){"
+      + "var k=localStorage.key(i);o[k]=localStorage.getItem(k);}return JSON.stringify(o);})()";
+    private SharedPreferences appPrefs;
+    private boolean migrating = false;
+    private String migrationData = null;
 
     // 注入網頁的 JS：攔截 <a download> 的 blob:/data: 點擊，把內容以 base64 轉交原生下載。
     // 這解決了 WebView 不會自動處理 blob 下載的問題（否則「匯出 JSON/CSV」在 App 內會假動作）。
@@ -74,6 +98,7 @@ public class MainActivity extends Activity {
 
         webView = findViewById(R.id.webview);
         oauthPrefs = getSharedPreferences("bk_oauth", MODE_PRIVATE);
+        appPrefs = getSharedPreferences("bk_app", MODE_PRIVATE);
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);          // 啟用 localStorage（資料持久化）
@@ -86,11 +111,63 @@ public class MainActivity extends Activity {
 
         // 頁面載入完成後注入下載攔截腳本，讓網頁的「匯出」能真的存檔
         webView.setWebViewClient(new WebViewClient() {
+            // v3.27：攔截本網域（tk101012000.github.io/expense-tracker/…）的資源請求，
+            // 由打包進 APK 的 assets 直接回應 → 頁面來源是合法 https 但內容完全離線。
+            // 非本網域（Google/Dropbox/字型等）回傳 null 交由 WebView 走真實網路。
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                try {
+                    Uri u = request.getUrl();
+                    if (u == null) return null;
+                    if (!APP_HOST.equalsIgnoreCase(u.getHost())) return null;   // 只攔本網域
+                    String path = u.getPath();                                  // 例：/expense-tracker/js/app.js
+                    if (path == null) return null;
+                    String rel;
+                    if (path.equals("/expense-tracker") || path.equals(URL_PREFIX)) {
+                        rel = "index.html";                                    // 根路徑 → index.html
+                    } else if (path.startsWith(URL_PREFIX)) {
+                        rel = path.substring(URL_PREFIX.length());             // 剝除前綴：js/app.js
+                    } else {
+                        return null;                                           // 非本 App 路徑，走網路
+                    }
+                    if (rel.isEmpty() || rel.endsWith("/")) rel += "index.html";
+                    return serveAsset(rel);
+                } catch (Exception e) {
+                    return null; // 攔截失敗就退回網路，避免整頁白屏
+                }
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                boolean isFile = url != null && url.startsWith("file://");
+
+                // ── v3.27 遷移階段一：舊 file:// 頁面載入完，讀出其 localStorage ──
+                if (migrating && isFile) {
+                    view.evaluateJavascript(DUMP_JS, value -> {
+                        migrationData = value;                 // 已是 JSON 字串字面量（含跳脫）
+                        runOnUiThread(() -> webView.loadUrl(APP_URL));  // 轉去 https origin
+                    });
+                    return;
+                }
+
                 pageReady = true;
                 view.evaluateJavascript(INJECT_DL, null);
+
+                // ── v3.27 遷移階段二：https 頁面載入完，把舊資料寫入新 origin（僅一次）──
+                if (migrating && !isFile) {
+                    migrating = false;
+                    appPrefs.edit().putBoolean("https_migrated", true).apply();
+                    // "{}" 為 4 字元，代表舊端無資料；有資料才注入並重載讓 app.js 重讀 DB。
+                    if (migrationData != null && migrationData.length() > 4 && !"null".equals(migrationData)) {
+                        String js = "(function(){try{var o=JSON.parse(" + migrationData + ");var n=0;"
+                                  + "for(var k in o){if(localStorage.getItem(k)===null){localStorage.setItem(k,o[k]);n++;}}"
+                                  + "if(n>0)location.reload();}catch(e){}})();";
+                        view.evaluateJavascript(js, null);
+                    }
+                    migrationData = null;
+                }
+
                 // 若 OAuth 回傳在頁面載入前就到了，此時補執行
                 if (pendingOAuth != null) {
                     String js = pendingOAuth;
@@ -124,13 +201,21 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 離線模式：直接載入打包進 assets 的網頁（不附加 cache-buster，
-        // assets 會隨 APK 一併更新，且本機資料 localStorage 不受影響）。
-        webView.loadUrl(APP_URL);
-
         // 注入原生橋 BKNATIVE：網頁呼叫 BKNATIVE.openOAuth(url) 時，以系統瀏覽器 /
-        // Chrome Custom Tabs 開啟 OAuth 授權頁，避免嵌入 WebView 的 UA 被 Google 擋下（disallowed_useragent）
+        // Chrome Custom Tabs 開啟 OAuth 授權頁，避免嵌入 WebView 的 UA 被 Google 擋下（disallowed_useragent）。
+        // 必須在 loadUrl 之前註冊，確保頁面首次執行 JS 時 window.BKNATIVE 已存在
+        // （app.js 據此判斷是否跳過 Service Worker）。
         webView.addJavascriptInterface(new NativeBridge(), "BKNATIVE");
+
+        // v3.27：首次啟動先做 file://→https 的 localStorage 遷移，之後一律直載 https。
+        // 內容皆由 shouldInterceptRequest 從 assets 提供（離線）。
+        boolean migrated = appPrefs.getBoolean("https_migrated", false);
+        if (migrated) {
+            webView.loadUrl(APP_URL);                 // https origin（內容走攔截器）
+        } else {
+            migrating = true;
+            webView.loadUrl(OLD_FILE_URL);            // 先載舊 file:// 讀出既有資料
+        }
 
         // 冷啟動若直接由自訂 scheme 進入（App 被完全殺掉後經由 billingtracker:// 調起）：
         // 先記錄 intent，待網頁載入完成（onPageFinished）後補執行 OAuth 回傳。
@@ -238,6 +323,45 @@ public class MainActivity extends Activity {
                 showToast("匯出失敗：" + (e.getMessage() == null ? e.toString() : e.getMessage()));
             }
         }
+    }
+
+    /* ---------- v3.27：從 assets 根目錄提供本網域資源 ----------
+       relPath 例：index.html、js/app.js、css/styles.css（已剝除 /expense-tracker/ 前綴） */
+    private WebResourceResponse serveAsset(String relPath) {
+        try {
+            InputStream is = getAssets().open(relPath);
+            String mime = guessMime(relPath);
+            boolean isText = mime.startsWith("text/")
+                    || mime.equals("application/javascript")
+                    || mime.equals("application/json")
+                    || mime.equals("image/svg+xml");
+            String encoding = isText ? "utf-8" : null;
+            WebResourceResponse resp = new WebResourceResponse(mime, encoding, is);
+            // 同源資源，附上寬鬆快取標頭即可；避免 no-store 造成重複讀 asset。
+            resp.setResponseHeaders(Collections.singletonMap("Cache-Control", "no-cache"));
+            return resp;
+        } catch (Exception e) {
+            // 找不到對應 asset（例如某資源實際只在遠端）→ 回 null 走網路
+            return null;
+        }
+    }
+
+    private static String guessMime(String path) {
+        String p = path.toLowerCase();
+        if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
+        if (p.endsWith(".js") || p.endsWith(".mjs"))   return "application/javascript";
+        if (p.endsWith(".css"))  return "text/css";
+        if (p.endsWith(".json") || p.endsWith(".webmanifest")) return "application/json";
+        if (p.endsWith(".svg"))  return "image/svg+xml";
+        if (p.endsWith(".png"))  return "image/png";
+        if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
+        if (p.endsWith(".gif"))  return "image/gif";
+        if (p.endsWith(".webp")) return "image/webp";
+        if (p.endsWith(".ico"))  return "image/x-icon";
+        if (p.endsWith(".woff2")) return "font/woff2";
+        if (p.endsWith(".woff"))  return "font/woff";
+        if (p.endsWith(".ttf"))   return "font/ttf";
+        return "application/octet-stream";
     }
 
     private void showToast(String msg) {

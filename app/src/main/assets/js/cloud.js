@@ -7,14 +7,14 @@
   'use strict';
 
   const STORE = 'billkeeper_cloud';
-  // 雲端 OAuth 回傳網址必須是「託管的合法網址」（已在 Google Cloud 註冊），
-  // 不能隨載入環境而變：App 離線模式(file://)下 origin 是 file://，若用
-  // location.origin 當 redirect_uri，Google 會拒絕(redirect_uri_mismatch)，
-  // 且 Chrome Custom Tabs 也無法載入 file://。故無論遠端載入或離線打包，
-  // redirect_uri 一律用託管網址，由其頁面 inline snippet 轉 billingtracker:// 回傳 App。
-  const REDIRECT = (location.protocol === 'file:')
-    ? 'https://tk101012000.github.io/expense-tracker/'
-    : (location.origin + location.pathname);
+  // 雲端 OAuth 回傳網址必須是「託管的合法網址」（已在 Google Cloud 註冊）。
+  // 自 v3.27 起 App 內 WebView 改以 https://tk101012000.github.io/expense-tracker/index.html
+  // 為來源載入（由原生 shouldInterceptRequest 提供本地 assets），因此 location.origin+
+  // location.pathname 會變成 .../expense-tracker/index.html（含 index.html），與 Google
+  // 註冊的 .../expense-tracker/（結尾斜線）不符 → redirect_uri_mismatch。
+  // 故 redirect_uri 一律固定用託管根網址（含結尾斜線），不隨載入路徑變動，
+  // 由該頁 inline snippet 轉 billingtracker:// 回傳 App。
+  const REDIRECT = 'https://tk101012000.github.io/expense-tracker/';
 
   const PROVIDERS = {
     drive: {
@@ -336,7 +336,7 @@
     // 即使回傳過程中 WebView 被重建也能完成 token 交換）。若原生未提供，退回同上下文的 sessionStorage。
     if (!verifier || !provider) {
       const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
-      if (!raw) { toast('找不到授權資訊，請重新連接'); cleanup(); return; }
+      if (!raw) { alert('找不到授權資訊，請重新連接'); cleanup(); return; }
       const o = JSON.parse(raw);
       verifier = o.verifier; provider = o.provider;
     }
@@ -345,7 +345,9 @@
       applyToken(provider, tok);
       toast('已連接 ' + PROVIDERS[provider].name);
     } catch (e) {
-      toast('連接失敗：' + (e.message || e));
+      // 用 alert 持久顯示，方便使用者截圖回報確切錯誤（token 交換失敗多為 CORS / 網路 / redirect_uri 不符）。
+      alert('連接失敗：' + (e && (e.message || e.toString()) || '未知錯誤') +
+            '\n\n若持續失敗，請截圖此訊息回報。');
     }
   };
 
