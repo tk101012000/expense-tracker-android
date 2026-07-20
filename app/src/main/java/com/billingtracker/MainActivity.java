@@ -32,7 +32,9 @@ public class MainActivity extends Activity {
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);          // 啟用 localStorage（資料持久化）
         ws.setDatabaseEnabled(true);
-        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // #10 修復：改為 MIXED_CONTENT_NEVER_ALLOW，防止 HTTPS 頁面載入 HTTP 資源導致 MITM
+        //         （本 App 的 GitHub Pages 已是全 HTTPS，無需放行 HTTP 混合內容）
+        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
         ws.setAllowFileAccess(true);
 
