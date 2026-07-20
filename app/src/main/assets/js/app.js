@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.31';
+const APP_VERSION = 'yu-v3.32';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -1726,9 +1726,24 @@ function deleteBill() {
 /* =========================================================
    匯出 / 匯入
    ========================================================= */
+// UTF-8 字串轉 base64（含中文正確處理）
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
 // #11 修復：Blob URL 改用 onblur 觸發 revoke，避免固定 1 秒延遲的不確定性；
 //         同時保留 setTimeout 作為兜底（雙重保護），快速連續匯出不會累積洩漏
 function download(filename, content, mime) {
+  // v3.32：App 內（有 BKNATIVE）直接呼叫原生下載，不依賴 blob+<a download> 的 click 攔截
+  // （WebView 中程式化 a.click() 常被吞掉，導致「已匯出」但手機無檔案）。
+  if (window.BKNATIVE && typeof window.BKNATIVE.downloadFile === 'function') {
+    try {
+      window.BKNATIVE.downloadFile(utf8ToBase64(content), mime, filename);
+      return;
+    } catch (e) { /* 失敗則退回 blob 方式 */ }
+  }
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
