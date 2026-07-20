@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -242,6 +243,10 @@ public class MainActivity extends Activity {
         String err = uri.getQueryParameter("error");
         if (code == null && err == null) return;
 
+        // v3.28 診斷：確認回傳鏈確實到達 App（若使用者看不到此 Toast，表示 billingtracker:// 沒喚起 App）
+        Log.d("BKCloud", "callback received code=" + (code != null ? code.substring(0, Math.min(6, code.length())) : "null") + " err=" + err);
+        showToast("收到授權碼，連接中…");
+
         // 找回 PKCE verifier / provider：優先用記憶體，回退 SharedPreferences（App 被回收後仍可取回）
         String verifier = pendingVerifier;
         String provider = pendingProvider;
@@ -263,14 +268,22 @@ public class MainActivity extends Activity {
         // WebView 可能尚未就緒（cloud.js 尚未定義 BKOAuthBridge）：
         // 已載入則立即執行，否則暫存待 onPageFinished 補執行。
         if (pageReady) {
+            Log.d("BKCloud", "inject BKOAuthBridge (pageReady=true)");
             webView.evaluateJavascript(js, null);
         } else {
+            Log.d("BKCloud", "page not ready, defer BKOAuthBridge to onPageFinished");
             pendingOAuth = js;
         }
     }
 
     /** 供網頁呼叫的原生橋。 */
     private class NativeBridge {
+        /** v3.28 診斷：網頁把雲端連線關鍵步驟經此輸出到 logcat（tag BKCloud） */
+        @JavascriptInterface
+        public void log(String msg) {
+            Log.d("BKCloud", msg == null ? "" : msg);
+        }
+
         /** 以系統瀏覽器 / Chrome Custom Tabs 開啟 OAuth 授權頁 */
         @JavascriptInterface
         public void openOAuth(String url, String stateKey, String verifier, String provider) {

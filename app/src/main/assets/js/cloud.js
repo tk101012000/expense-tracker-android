@@ -16,6 +16,15 @@
   // 由該頁 inline snippet 轉 billingtracker:// 回傳 App。
   const REDIRECT = 'https://tk101012000.github.io/expense-tracker/';
 
+  // v3.28 診斷輔助：把雲端連線關鍵步驟經 BKNATIVE.log 輸出到 logcat，
+  // 並在錯誤時把訊息寫入雲端狀態區（確保使用者一定看得到，不依賴 alert/Toast 是否彈出）。
+  function nativeLog(m) {
+    try { if (window.BKNATIVE && typeof window.BKNATIVE.log === 'function') window.BKNATIVE.log(String(m)); } catch (e) {}
+  }
+  function setStatus(t) {
+    try { const el = document.getElementById('cloudStatus'); if (el) el.textContent = t; } catch (e) {}
+  }
+
   const PROVIDERS = {
     drive: {
       name: 'Google Drive',
@@ -103,6 +112,7 @@
     if (window.BKNATIVE && typeof window.BKNATIVE.openOAuth === 'function') {
       // 把 PKCE verifier / provider / stateKey 一併交給原生層保存（SharedPreferences），
       // 回傳時即使 WebView 被重建也能找回 verifier 完成 token 交換（雲端登入失敗的主因）。
+      nativeLog('openOAuth called provider=' + provider);
       window.BKNATIVE.openOAuth(target, stateKey, verifier, provider);
     } else {
       location.href = target;
@@ -326,28 +336,32 @@
      會以自訂 scheme billingtracker://oauth/callback 把 code/state 回傳給 App，
      MainActivity.onNewIntent 收到後呼叫此函式完成 token 交換。 */
   window.BKOAuthBridge = async function (code, stateKey, err, verifier, provider) {
+    nativeLog('BKOAuthBridge called code=' + (code ? code.slice(0,6) + '…' : 'null') + ' provider=' + provider);
     if (!code) {
-      if (err) toast('授權失敗：' + err);
-      else toast('授權已取消');
-      cleanup();
-      return;
+      const m = err ? ('授權失敗：' + err) : '授權已取消';
+      setStatus(m); toast(m); cleanup(); return;
     }
     // 優先用原生層經 billingtracker:// 回傳時附帶的 verifier/provider（不依賴 WebView sessionStorage，
     // 即使回傳過程中 WebView 被重建也能完成 token 交換）。若原生未提供，退回同上下文的 sessionStorage。
     if (!verifier || !provider) {
       const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
-      if (!raw) { alert('找不到授權資訊，請重新連接'); cleanup(); return; }
+      if (!raw) { const m = '找不到授權資訊，請重新連接'; setStatus(m); alert(m); cleanup(); return; }
       const o = JSON.parse(raw);
       verifier = o.verifier; provider = o.provider;
     }
     try {
+      nativeLog('exchange start provider=' + provider);
       const tok = await exchange(provider, code, verifier);
+      nativeLog('exchange ok access_token=' + (!!tok && !!tok.access_token));
       applyToken(provider, tok);
-      toast('已連接 ' + PROVIDERS[provider].name);
+      const m = '已連接 ' + PROVIDERS[provider].name;
+      setStatus(m); toast(m);
     } catch (e) {
-      // 用 alert 持久顯示，方便使用者截圖回報確切錯誤（token 交換失敗多為 CORS / 網路 / redirect_uri 不符）。
-      alert('連接失敗：' + (e && (e.message || e.toString()) || '未知錯誤') +
-            '\n\n若持續失敗，請截圖此訊息回報。');
+      // 錯誤同時寫入雲端狀態區（一定看得到）+ alert（截圖用）+ logcat，確保無論 alert 是否彈出都能定位。
+      const msg = '連接失敗：' + (e && (e.message || e.toString()) || '未知錯誤');
+      nativeLog('exchange error: ' + msg);
+      setStatus(msg + '（請截圖回報）');
+      alert(msg + '\n\n若持續失敗，請截圖此訊息回報。');
     }
   };
 
