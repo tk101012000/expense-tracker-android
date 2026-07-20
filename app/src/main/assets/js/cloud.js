@@ -126,7 +126,7 @@
     const stateKey = url.searchParams.get('state');
     const err = url.searchParams.get('error');
     if (!code) return false;
-    if (err) { const m = '授權失敗：' + err; setStatus(m); toast(m); cleanup(); return true; }
+    if (err) { const m = '授權失敗：' + err; setStatus(m); toast(m); if (stateKey) localStorage.removeItem('bk_oauth_' + stateKey); cleanup(); return true; }
 
     const raw = localStorage.getItem('bk_oauth_' + stateKey);
     if (raw) {

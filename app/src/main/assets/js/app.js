@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.37';
+const APP_VERSION = 'yu-v3.38';
 const APP_BUILD_DATE = '2026-07-21';
 
 /* ---------- 工具 ---------- */
@@ -1621,6 +1621,7 @@ function recordSplitTxn() {
   const txn = {
     id: uid(), type: 'expense', amount: total, date: todayISO(),
     category: cat, accountId: accId, note, paidBy, createdAt: Date.now(),
+    currency: DB.settings.currency || CURRENCIES[0].code,
   };
   const clean = {};
   TXN_ALLOWED_FIELDS.forEach(f => { if (f in txn) clean[f] = txn[f]; });
@@ -1748,8 +1749,8 @@ function utf8ToBase64(str) {
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin);
 }
-// #11 修復：Blob URL 改用 onblur 觸發 revoke，避免固定 1 秒延遲的不確定性；
-//         同時保留 setTimeout 作為兜底（雙重保護），快速連續匯出不會累積洩漏
+// #11 修復：Blob URL 統一用 setTimeout 延遲 revoke + remove，
+//         給瀏覽器足夠時間啟動下載後一并清理，快速連續匯出不會累積洩漏
 function download(filename, content, mime) {
   // v3.32：App 內（有 BKNATIVE）直接呼叫原生下載，不依賴 blob+<a download> 的 click 攔截
   // （WebView 中程式化 a.click() 常被吞掉，導致「已匯出」但手機無檔案）。
@@ -1763,11 +1764,8 @@ function download(filename, content, mime) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-  a.remove();
-  // 主要釋放：onblur 在下載對話框關閉後觸發（現代瀏覽器支援 keep-alive-until-consumed）
-  a.onblur = () => URL.revokeObjectURL(url);
-  // 兜底：即使 onblur 未觸發（如部分 WebView），最多 5 秒後強制釋放
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  // 延遲移除並釋放：給瀏覽器足夠時間啟動下載，完成後一并清理（避免過早 remove 導致 onblur 失效或下載中斷）
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
 }
 function exportJSON() {
   download(`繳費記帳_${todayISO()}.json`, JSON.stringify(DB, null, 2), 'application/json');
@@ -1836,6 +1834,12 @@ function validateAndSanitize(parsed) {
     parsed.members = parsed.members.map(m => sanitizeObj(m, MEMBER_ALLOWED_FIELDS));
   } else {
     parsed.members = [];
+  }
+  // settings 必須是純物件（非陣列／字串／數字），否則後續 DB.settings.xxx 會拋 TypeError
+  if (parsed.settings && typeof parsed.settings === 'object' && !Array.isArray(parsed.settings)) {
+    parsed.settings = sanitizeObj(parsed.settings, null);
+  } else {
+    parsed.settings = {};
   }
   return parsed;
 }
@@ -1979,7 +1983,7 @@ function bindMiscEvents() {
     if (confirm('確定清空所有資料？此動作無法復原！')) {
       localStorage.removeItem(STORE_KEY);
       localStorage.removeItem(BACKUP_KEY);  // #1 配套：重置時也清除損壞備份
-      DB = { accounts: [], txns: [], bills: [], members: [] };
+      DB = { accounts: [], txns: [], bills: [], members: [], settings: DB.settings || {} };
       _balanceDirty = true;
       save(); render(); toast('已清空所有資料');
     }
@@ -1988,7 +1992,11 @@ function bindMiscEvents() {
   // 提醒鈕
   $('#reminderBtn').addEventListener('click', () => { switchView('bills'); billFilter = 'unpaid'; $$('.seg[data-billfilter]').forEach(x => x.classList.toggle('active', x.dataset.billfilter === 'unpaid')); renderBills(); });
 
-  window.addEventListener('resize', () => { if (currentView === 'stats') renderStats(); if (currentView === 'dashboard') renderDashboard(); });
+  let _resizeT = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeT);
+    _resizeT = setTimeout(() => { if (currentView === 'stats') renderStats(); if (currentView === 'dashboard') renderDashboard(); }, 150);
+  });
 
   // v3.20：貨幣選擇器綁定
   bindCurrencyPicker();

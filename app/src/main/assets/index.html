@@ -10,7 +10,7 @@
   <title>繳費記帳 · 家庭理財助手</title>
   <!-- #17 修復：Content-Security-Policy 限制資源來源，減少 XSS 攻擊面 -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://api.dropboxapi.com https://content.dropboxapi.com https://www.googleapis.com; img-src 'self' data: blob:; frame-ancestor 'none'; base-uri 'self'; form-action 'self'" />
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://api.dropboxapi.com https://content.dropboxapi.com https://www.googleapis.com; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -335,7 +335,7 @@
             <button class="ghost-btn" id="cloudDownloadBtn" disabled>下載還原</button>
             <button class="danger-btn" id="cloudDisconnectBtn" disabled>斷線</button>
           </div>
-          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.37]</small></p>
+          <p class="hint-text" id="cloudStatus" style="margin-top:10px">尚未連接 <small style="color:#999">[yu-v3.38]</small></p>
           <label class="field-toggle" style="margin-top:12px">
             <span>每日自動雲端備份</span>
             <input type="checkbox" id="autoBackupToggle">
@@ -598,7 +598,7 @@
   <!-- Toast -->
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/cloud.js?v=yu-v3.37"></script>
-  <script src="js/app.js?v=yu-v3.37"></script>
+  <script src="js/cloud.js?v=yu-v3.38"></script>
+  <script src="js/app.js?v=yu-v3.38"></script>
 </body>
 </html>
