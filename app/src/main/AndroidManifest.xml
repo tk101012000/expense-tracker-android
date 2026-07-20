@@ -14,12 +14,20 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- OAuth 回傳：系統瀏覽器 / Custom Tabs 完成授權後以自訂 scheme 把 code 回傳給 App -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="billingtracker" android:host="oauth" android:path="/callback" />
             </intent-filter>
         </activity>
 

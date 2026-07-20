@@ -11,6 +11,9 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
+import androidx.browser.customtabs.CustomTabsIntent;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
@@ -68,6 +71,57 @@ public class MainActivity extends Activity {
         // 每次啟動都在網址後加 cache-buster，強迫 WebView 抓取最新網頁，
         // 避免「要手動清快取才能更新」的問題。不影響 localStorage 資料。
         webView.loadUrl(APP_URL + "?nocache=" + System.currentTimeMillis());
+
+        // 注入原生橋 BKNATIVE：網頁呼叫 BKNATIVE.openOAuth(url) 時，以系統瀏覽器 /
+        // Chrome Custom Tabs 開啟 OAuth 授權頁，避免嵌入 WebView 的 UA 被 Google 擋下（disallowed_useragent）
+        webView.addJavascriptInterface(new NativeBridge(), "BKNATIVE");
+
+        // 冷啟動若直接由自訂 scheme 進入（極少見），等網頁載入後補處理 OAuth 回傳
+        webView.postDelayed(() -> handleOAuthCallback(getIntent()), 2000);
+    }
+
+    /* ---------- OAuth 回傳（billingtracker://oauth/callback） ----------
+       授權頁在系統瀏覽器 / Custom Tabs 完成後，網頁會以自訂 scheme 把 code/state 回傳，
+       本 App 攔截後注入 WebView 執行 window.BKOAuthBridge 完成 token 交換。 */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleOAuthCallback(intent);
+    }
+
+    private void handleOAuthCallback(Intent intent) {
+        if (intent == null) return;
+        Uri uri = intent.getData();
+        if (uri == null) return;
+        if (!"billingtracker".equals(uri.getScheme()) || !"/oauth/callback".equals(uri.getPath())) return;
+        String code = uri.getQueryParameter("code");
+        String stateKey = uri.getQueryParameter("state");
+        String err = uri.getQueryParameter("error");
+        if (code == null && err == null) return;
+        String js = "window.BKOAuthBridge && window.BKOAuthBridge("
+                + JSONObject.quote(code == null ? "" : code) + ","
+                + JSONObject.quote(stateKey == null ? "" : stateKey) + ","
+                + JSONObject.quote(err == null ? "" : err) + ");";
+        // WebView 可能尚未就緒，post 到主執行緒執行
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    /** 供網頁呼叫：以系統瀏覽器 / Chrome Custom Tabs 開啟 OAuth 授權頁 */
+    private class NativeBridge {
+        @JavascriptInterface
+        public void openOAuth(String url) {
+            try {
+                CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
+                tabs.launchUrl(MainActivity.this, Uri.parse(url));
+            } catch (Exception e) {
+                // Custom Tabs 不可用（如未安裝 Chrome）時，退回系統瀏覽器
+                try {
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                    MainActivity.this.startActivity(i);
+                } catch (Exception ignored) {}
+            }
+        }
     }
 
     // 處理檔案選擇器的回傳結果

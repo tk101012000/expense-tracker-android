@@ -10,8 +10,8 @@ android {
         applicationId 'com.billingtracker'
         minSdk 24
         targetSdk 34
-        versionCode 13
-        versionName '3.13'
+        versionCode 17
+        versionName '3.17'
     }
 
     buildTypes {
@@ -28,4 +28,6 @@ android {
 }
 
 dependencies {
+    // Chrome Custom Tabs：以系統瀏覽器開啟 OAuth 授權頁，規避嵌入 WebView 的 disallowed_useragent
+    implementation 'androidx.browser:browser:1.8.0'
 }
