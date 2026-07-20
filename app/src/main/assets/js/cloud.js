@@ -7,7 +7,14 @@
   'use strict';
 
   const STORE = 'billkeeper_cloud';
-  const REDIRECT = location.origin + location.pathname;
+  // 雲端 OAuth 回傳網址必須是「託管的合法網址」（已在 Google Cloud 註冊），
+  // 不能隨載入環境而變：App 離線模式(file://)下 origin 是 file://，若用
+  // location.origin 當 redirect_uri，Google 會拒絕(redirect_uri_mismatch)，
+  // 且 Chrome Custom Tabs 也無法載入 file://。故無論遠端載入或離線打包，
+  // redirect_uri 一律用託管網址，由其頁面 inline snippet 轉 billingtracker:// 回傳 App。
+  const REDIRECT = (location.protocol === 'file:')
+    ? 'https://tk101012000.github.io/expense-tracker/'
+    : (location.origin + location.pathname);
 
   const PROVIDERS = {
     drive: {
