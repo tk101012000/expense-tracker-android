@@ -145,6 +145,7 @@ public class MainActivity extends Activity {
                         return null;                                           // 非本 App 路徑，走網路
                     }
                     if (rel.isEmpty() || rel.endsWith("/")) rel += "index.html";
+                    if (rel.contains("..")) return null;   // #5 修復：阻擋路徑穿越（如 /expense-tracker/../../secret）
                     return serveAsset(rel);
                 } catch (Exception e) {
                     return null; // 攔截失敗就退回網路，避免整頁白屏

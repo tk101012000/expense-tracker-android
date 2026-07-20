@@ -108,7 +108,7 @@ const ACCOUNT_META = {
 const CHART_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#6366f1', '#a855f7', '#eab308', '#64748b'];
 
 /* ---------- 版本資訊 ---------- */
-const APP_VERSION = 'yu-v3.34';
+const APP_VERSION = 'yu-v3.35';
 const APP_BUILD_DATE = '2026-07-20';
 
 /* ---------- 工具 ---------- */
@@ -168,6 +168,14 @@ function load() {
       `localStorage.getItem('${BACKUP_KEY}')\n\n` +
       '錯誤詳情：' + (e.message || e)
     );
+  }
+  // #4 修復：localStorage 可能存「合法 JSON 但非物件」（如字串/陣列）；
+  //   此時 DB 為非物件，後續 DB.xxx ||= ... 在嚴格模式拋 TypeError 且不被 try 捕獲 → 整頁空白。
+  //   統一視為損壞：備份原始值並重置為空物件，避免崩潰。
+  if (typeof DB !== 'object' || DB === null || Array.isArray(DB)) {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) { try { localStorage.setItem(BACKUP_KEY, raw); } catch (_) {} }
+    DB = {};
   }
   // 確保所有陣列存在
   DB.accounts ||= []; DB.txns ||= []; DB.bills ||= []; DB.members ||= [];
