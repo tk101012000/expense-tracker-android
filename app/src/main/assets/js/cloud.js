@@ -77,21 +77,22 @@
   async function connect() {
     const provider = $('#cloudProvider').value;
     const clientId = $('#cloudClientId').value.trim();
-    // #3 修復：clientSecret 不再長期存入 localStorage；
-    //         只在本次 session 中暫存（用 sessionStorage），僅用於一次 token exchange
+    // #3 修復：clientSecret 不寫入主雲端狀態（STORE）；
+    // #7 修復：改用 localStorage（而非 sessionStorage）暫存，使其跨重新整理 / 新分頁不遺失，
+    //         供 token 交換與日後 refresh 使用，斷線時清除。
     const clientSecret = $('#cloudClientSecret').value.trim();
     if (!clientId) { toast('請先填入 ' + PROVIDERS[provider].name + ' 的 Client ID / App Key'); return; }
 
     state.provider = provider; state.clientId = clientId;
-    // #3 修復：secret 存 sessionStorage（關閉 tab 即消失），不寫入 localStorage
-    if (clientSecret) sessionStorage.setItem('bk_cs', clientSecret);
-    else sessionStorage.removeItem('bk_cs');
+    if (clientSecret) localStorage.setItem('bk_cs', clientSecret);
+    else localStorage.removeItem('bk_cs');
     saveState();
 
     const verifier = randomStr(64);
     const challenge = await pkceChallenge(verifier);
     const stateKey = randomStr(24);
-    sessionStorage.setItem('bk_oauth_' + stateKey, JSON.stringify({ provider, verifier }));
+    // #7 修復：PKCE verifier 存 localStorage，確保授權回傳（即使落在不同瀏覽上下文）仍能完成交換
+    localStorage.setItem('bk_oauth_' + stateKey, JSON.stringify({ provider, verifier }));
 
     const p = PROVIDERS[provider];
     const params = new URLSearchParams({
@@ -127,12 +128,12 @@
     if (!code) return false;
     if (err) { const m = '授權失敗：' + err; setStatus(m); toast(m); cleanup(); return true; }
 
-    const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
+    const raw = localStorage.getItem('bk_oauth_' + stateKey);
     if (raw) {
       // 與發起 OAuth 同一瀏覽上下文（桌面 / 手機瀏覽器 / iPhone Safari）：
       // 直接在此完成 token 交換，token 會存進當前頁面的 localStorage。
       const { provider, verifier } = JSON.parse(raw);
-      sessionStorage.removeItem('bk_oauth_' + stateKey);
+      localStorage.removeItem('bk_oauth_' + stateKey);
       // 清除網址列中的 code，避免重新整理重複交換
       history.replaceState({}, document.title, REDIRECT);
       try {
@@ -166,8 +167,8 @@
       code, client_id: state.clientId, code_verifier: verifier,
       grant_type: 'authorization_code', redirect_uri: REDIRECT,
     });
-    // #3 修復：從 sessionStorage 讀取 secret（不從 localStorage），用完即棄
-    const cs = sessionStorage.getItem('bk_cs');
+    // #7 修復：從 localStorage 讀取 secret（跨分頁 / 重新整理不遺失）
+    const cs = localStorage.getItem('bk_cs');
     if (cs) body.append('client_secret', cs);
     const res = await fetch(p.tokenUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
@@ -212,8 +213,8 @@
     const body = new URLSearchParams({
       grant_type: 'refresh_token', refresh_token: state.refreshToken, client_id: state.clientId,
     });
-    // #3 修復：secret 從 sessionStorage 取
-    const cs = sessionStorage.getItem('bk_cs');
+    // #7 修復：secret 從 localStorage 取（跨分頁 / 重新整理不遺失）
+    const cs = localStorage.getItem('bk_cs');
     if (cs) body.append('client_secret', cs);
     const res = await fetch(p.tokenUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
@@ -226,6 +227,7 @@
 
   async function disconnect(notify = true) {
     state.accessToken = null; state.refreshToken = null; state.expiresAt = null;
+    localStorage.removeItem('bk_cs');   // #7：斷線一併清除暫存的 client secret
     saveState();
     if (notify) toast('已斷線');
     refreshUI();
@@ -368,13 +370,14 @@
       const m = err ? ('授權失敗：' + err) : '授權已取消';
       setStatus(m); toast(m); cleanup(); return;
     }
-    // 優先用原生層經 billingtracker:// 回傳時附帶的 verifier/provider（不依賴 WebView sessionStorage，
-    // 即使回傳過程中 WebView 被重建也能完成 token 交換）。若原生未提供，退回同上下文的 sessionStorage。
+    // 優先用原生層經 billingtracker:// 回傳時附帶的 verifier/provider（不依賴 WebView 儲存，
+    // 即使回傳過程中 WebView 被重建也能完成 token 交換）。若原生未提供，退回 localStorage 中的 PKCE 暫存。
     if (!verifier || !provider) {
-      const raw = sessionStorage.getItem('bk_oauth_' + stateKey);
+      const raw = localStorage.getItem('bk_oauth_' + stateKey);
       if (!raw) { const m = '找不到授權資訊，請重新連接'; setStatus(m); alert(m); cleanup(); return; }
       const o = JSON.parse(raw);
       verifier = o.verifier; provider = o.provider;
+      localStorage.removeItem('bk_oauth_' + stateKey);   // #7：用完清除 PKCE 暫存
     }
     try {
       nativeLog('exchange start provider=' + provider);
